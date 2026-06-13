@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dog Skin Disease Prediction - AI-Powered Diagnosis</title>
+    <link rel="icon" type="image/png" href="favicon.png"/>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 320"><path fill="%23ffffff" fill-opacity="0.2" d="M0,96L48,112C96,128,192,160,240,160C288,160,336,128,384,112C432,96,480,64,528,64C576,64,624,96,672,112C720,128,768,160,816,160C864,160,912,128,960,112C1008,96,1056,64,1104,64C1152,64,1200,96,1248,112C1296,128,1344,160,1392,160C1440,160,1440,160,1440,160L1440,320L1392,320C1344,320,1296,320,1248,320C1200,320,1152,320,1104,320C1056,320,1008,320,960,320C912,320,864,320,816,320C768,320,720,320,672,320C624,320,576,320,528,320C480,320,432,320,384,320C336,320,288,320,240,320C192,320,96,320,48,320L0,320Z"></path></svg>'), linear-gradient(135deg, #ffffff 0%, #e3f2fd 25%, #bbdefb 50%, #90caf9 75%, #64b5f6 100%);
+            background-size: cover, 400% 400%;
+            background-position: center, 0% 50%;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow-x: hidden;
+        }
+
+        @keyframes gradientShift {
+            0%, 100% { background-position: center, 0% 50%; }
+            50% { background-position: center, 100% 50%; }
+        }
+
+        .floating-shapes {
+            position: fixed;
+            width: 100%;
+            height: 100%;
+            top: 0;
+            left: 0;
+            pointer-events: none;
+            overflow: hidden;
+            z-index: 1;
+        }
+
+        .shape {
+            position: absolute;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.1);
+            animation: float 20s infinite ease-in-out;
+        }
+
+        .shape:nth-child(1) {
+            width: 80px;
+            height: 80px;
+            left: 10%;
+            top: 20%;
+            animation-delay: 0s;
+            background: rgba(100, 181, 246, 0.3);
+        }
+
+        .shape:nth-child(2) {
+            width: 120px;
+            height: 120px;
+            left: 70%;
+            top: 60%;
+            animation-delay: 2s;
+            background: rgba(144, 202, 249, 0.3);
+        }
+
+        .shape:nth-child(3) {
+            width: 60px;
+            height: 60px;
+            left: 85%;
+            top: 10%;
+            animation-delay: 4s;
+            background: rgba(187, 222, 251, 0.3);
+        }
+
+        .shape:nth-child(4) {
+            width: 100px;
+            height: 100px;
+            left: 25%;
+            top: 80%;
+            animation-delay: 6s;
+            background: rgba(227, 242, 253, 0.3);
+        }
+
+        .shape:nth-child(5) {
+            width: 90px;
+            height: 90px;
+            left: 50%;
+            top: 30%;
+            animation-delay: 8s;
+            background: rgba(255, 255, 255, 0.4);
+        }
+
+        @keyframes float {
+            0%, 100% {
+                transform: translateY(0px) rotate(0deg);
+                opacity: 0.7;
+            }
+            25% {
+                transform: translateY(-20px) rotate(90deg);
+                opacity: 0.9;
+            }
+            50% {
+                transform: translateY(-40px) rotate(180deg);
+                opacity: 0.6;
+            }
+            75% {
+                transform: translateY(-20px) rotate(270deg);
+                opacity: 0.8;
+            }
+        }
+
+        .container {
+            text-align: center;
+            padding: 20px;
+            max-width: 900px;
+            width: 100%;
+            position: relative;
+            z-index: 2;
+        }
+
+        .hero-section {
+            background: linear-gradient(135deg, 
+                rgba(255, 255, 255, 0.95) 0%,
+                rgba(227, 242, 253, 0.9) 25%,
+                rgba(187, 222, 251, 0.85) 50%,
+                rgba(144, 202, 249, 0.9) 75%,
+                rgba(100, 181, 246, 0.95) 100%);
+            backdrop-filter: blur(20px) saturate(150%);
+            border-radius: 35px;
+            padding: 70px 50px;
+            box-shadow: 
+                0 40px 80px rgba(0, 0, 0, 0.1),
+                0 20px 40px rgba(100, 181, 246, 0.3),
+                inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+            border: 2px solid transparent;
+            background-clip: padding-box;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero-section::before {
+            content: '';
+            position: absolute;
+            top: -2px;
+            left: -2px;
+            right: -2px;
+            bottom: -2px;
+            background: linear-gradient(45deg, 
+                #64b5f6, #42a5f5, #2196f3, #1976d2, 
+                #90caf9, #bbdefb, #e3f2fd, #ffffff, #64b5f6);
+            border-radius: 35px;
+            z-index: -1;
+            opacity: 0.8;
+        }
+
+        @keyframes heroGlow {
+            0%, 100% { 
+                box-shadow: 
+                    0 40px 80px rgba(0, 0, 0, 0.15),
+                    0 20px 40px rgba(79, 172, 254, 0.2),
+                    inset 0 0 0 1px rgba(255, 255, 255, 0.3);
+            }
+            50% { 
+                box-shadow: 
+                    0 40px 80px rgba(0, 0, 0, 0.2),
+                    0 20px 40px rgba(245, 87, 108, 0.3),
+                    inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+            }
+        }
+
+        @keyframes borderGlow {
+            0%, 100% { 
+                background: linear-gradient(135deg, 
+                    rgba(255, 255, 255, 0.25) 0%,
+                    rgba(255, 255, 255, 0.15) 25%,
+                    rgba(79, 172, 254, 0.1) 50%,
+                    rgba(245, 87, 108, 0.15) 75%,
+                    rgba(255, 206, 84, 0.2) 100%);
+            }
+            50% { 
+                background: linear-gradient(135deg, 
+                    rgba(255, 206, 84, 0.25) 0%,
+                    rgba(79, 172, 254, 0.15) 25%,
+                    rgba(255, 255, 255, 0.1) 50%,
+                    rgba(245, 87, 108, 0.15) 75%,
+                    rgba(255, 107, 107, 0.2) 100%);
+            }
+        }
+
+        @keyframes borderRotate {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .logo-section {
+            margin-bottom: 40px;
+        }
+
+        .logo {
+            font-size: 5em;
+            margin-bottom: 25px;
+            background: linear-gradient(45deg, #64b5f6, #42a5f5, #2196f3, #1976d2, #90caf9, #bbdefb, #e3f2fd, #64b5f6);
+            background-size: 400% 400%;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            text-shadow: 0 0 30px rgba(100, 181, 246, 0.5);
+            filter: drop-shadow(0 0 20px rgba(33, 150, 243, 0.7));
+        }
+
+        h1 {
+            font-size: 3.5em;
+            font-weight: 800;
+            color: #1976d2;
+            margin-bottom: 25px;
+            background: linear-gradient(135deg, 
+                #64b5f6, #42a5f5, #2196f3, #1976d2, 
+                #90caf9, #bbdefb, #e3f2fd, #ffffff);
+            background-size: 400% 400%;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            text-shadow: 
+                0 0 20px rgba(100, 181, 246, 0.3),
+                0 0 40px rgba(33, 150, 243, 0.2);
+            letter-spacing: -1px;
+        }
+
+        .subtitle {
+            font-size: 1.3em;
+            color: #7f8c8d;
+            margin-bottom: 40px;
+            line-height: 1.6;
+        }
+
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 30px;
+            margin: 50px 0;
+        }
+
+        .feature-card {
+            background: linear-gradient(135deg, 
+                rgba(255, 255, 255, 0.9) 0%,
+                rgba(227, 242, 253, 0.8) 25%,
+                rgba(187, 222, 251, 0.7) 50%,
+                rgba(144, 202, 249, 0.8) 75%,
+                rgba(100, 181, 246, 0.9) 100%);
+            backdrop-filter: blur(10px);
+            padding: 35px 25px;
+            border-radius: 25px;
+            box-shadow: 
+                0 15px 35px rgba(0, 0, 0, 0.1),
+                0 5px 15px rgba(100, 181, 246, 0.3);
+            border: 1px solid rgba(100, 181, 246, 0.3);
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .feature-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, 
+                transparent, 
+                rgba(100, 181, 246, 0.1), 
+                transparent);
+            transition: left 0.8s ease;
+        }
+
+        .feature-card:hover::before {
+            left: 100%;
+        }
+
+        .feature-card:nth-child(1) {
+            border-color: rgba(100, 181, 246, 0.4);
+        }
+
+        .feature-card:nth-child(2) {
+            border-color: rgba(33, 150, 243, 0.4);
+        }
+
+        .feature-card:nth-child(3) {
+            border-color: rgba(144, 202, 249, 0.4);
+        }
+
+        .feature-card:nth-child(4) {
+            border-color: rgba(187, 222, 251, 0.4);
+        }
+
+        .feature-card:hover {
+            transform: translateY(-15px) scale(1.05);
+            box-shadow: 
+                0 25px 50px rgba(0, 0, 0, 0.15),
+                0 10px 25px rgba(33, 150, 243, 0.4),
+                0 0 0 2px rgba(255, 255, 255, 0.5);
+            border-color: rgba(100, 181, 246, 0.6);
+        }
+
+        .feature-icon {
+            font-size: 3em;
+            margin-bottom: 20px;
+            background: linear-gradient(45deg, #64b5f6, #42a5f5, #2196f3, #1976d2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .feature-title {
+            font-size: 1.2em;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+
+        .feature-description {
+            color: #7f8c8d;
+            line-height: 1.5;
+        }
+
+        .cta-section {
+            margin-top: 50px;
+        }
+
+        .cta-button {
+            display: inline-block;
+            background: linear-gradient(135deg, 
+                #64b5f6 0%, 
+                #42a5f5 20%, 
+                #2196f3 40%, 
+                #1976d2 60%, 
+                #90caf9 80%, 
+                #bbdefb 100%);
+            background-size: 300% 300%;
+            color: white;
+            text-decoration: none;
+            padding: 25px 60px;
+            border-radius: 50px;
+            font-size: 1.3em;
+            font-weight: 700;
+            border: none;
+            cursor: pointer;
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            box-shadow: 
+                0 15px 35px rgba(100, 181, 246, 0.4),
+                0 5px 15px rgba(0, 0, 0, 0.2);
+            position: relative;
+            overflow: hidden;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .cta-button:hover {
+            transform: translateY(-5px) scale(1.05);
+            box-shadow: 
+                0 20px 45px rgba(33, 150, 243, 0.5),
+                0 10px 25px rgba(0, 0, 0, 0.3);
+            background-position: 50% 100%;
+        }
+
+        .cta-button:active {
+            transform: translateY(-2px) scale(1.02);
+        }
+
+        .cta-button::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, 
+                transparent, 
+                rgba(255, 255, 255, 0.2), 
+                transparent);
+            transition: left 0.8s ease;
+        }
+
+        .cta-button:hover::before {
+            left: 100%;
+        }
+
+        .stats {
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            margin: 40px 0;
+            flex-wrap: wrap;
+        }
+
+        .stat-item {
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 2.5em;
+            font-weight: 700;
+            color: #1976d2;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            color: #64b5f6;
+            font-size: 1em;
+        }
+
+        .footer {
+            margin-top: 60px;
+            padding-top: 30px;
+            border-top: 1px solid rgba(0, 0, 0, 0.1);
+            color: #7f8c8d;
+        }
+
+        @media (max-width: 768px) {
+            .hero-section {
+                padding: 40px 20px;
+            }
+
+            h1 {
+                font-size: 2.2em;
+            }
+
+            .subtitle {
+                font-size: 1.1em;
+            }
+
+            .features {
+                grid-template-columns: 1fr;
+                gap: 20px;
+            }
+
+            .stats {
+                gap: 20px;
+            }
+
+            .cta-button {
+                padding: 15px 40px;
+                font-size: 1.1em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="floating-shapes">
+        <div class="shape"></div>
+        <div class="shape"></div>
+        <div class="shape"></div>
+        <div class="shape"></div>
+        <div class="shape"></div>
+    </div>
+    <div class="container">
+        <div class="hero-section">
+            <div class="logo-section">
+                <div class="logo">🐕</div>
+            </div>
+
+            <h1>Dog Skin Disease Prediction</h1>
+            <p class="subtitle">
+                Advanced AI-powered diagnosis system for detecting and classifying dog skin conditions with confidence and detailed treatment recommendations
+            </p>
+
+            <div class="stats">
+                <div class="stat-item">
+                    <div class="stat-number">7+</div>
+                    <div class="stat-label">Disease Types</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number">95%</div>
+                    <div class="stat-label">Accuracy</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number">24/7</div>
+                    <div class="stat-label">Available</div>
+                </div>
+            </div>
+
+            <div class="features">
+                <div class="feature-card">
+                    <div class="feature-icon">🤖</div>
+                    <div class="feature-title">AI-Powered</div>
+                    <div class="feature-description">Advanced MobileNetV2 deep learning model for accurate predictions</div>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📸</div>
+                    <div class="feature-title">Easy Upload</div>
+                    <div class="feature-description">Simple drag & drop interface for image submission</div>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📋</div>
+                    <div class="feature-title">Detailed Info</div>
+                    <div class="feature-description">Comprehensive symptoms, causes, and treatment guidance</div>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📱</div>
+                    <div class="feature-title">Cross-Platform</div>
+                    <div class="feature-description">Works on web browsers and mobile devices</div>
+                </div>
+            </div>
+
+            <div class="cta-section">
+                <a href="frontend.html" class="cta-button">
+                    🚀 Start Diagnosis
+                </a>
+            </div>
+
+            <div class="footer">
+                <p>⚠️ This system is for educational purposes only. Always consult with a qualified veterinarian for medical diagnosis.</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dog Skin Disease Prediction</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        .upload-section {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .upload-area {
+            border: 3px dashed #ddd;
+            border-radius: 15px;
+            padding: 40px;
+            margin: 20px 0;
+            background: #f8f9fa;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .upload-area:hover {
+            border-color: #4facfe;
+            background: #e3f2fd;
+        }
+
+        .upload-area.dragover {
+            border-color: #4facfe;
+            background: #e3f2fd;
+            transform: scale(1.02);
+        }
+
+        #fileInput {
+            display: none;
+        }
+
+        .upload-icon {
+            font-size: 3em;
+            color: #4facfe;
+            margin-bottom: 15px;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 25px;
+            font-size: 1.1em;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 10px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(79, 172, 254, 0.3);
+        }
+
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .preview-section {
+            margin: 30px 0;
+            text-align: center;
+        }
+
+        #imagePreview {
+            max-width: 100%;
+            max-height: 300px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            display: none;
+        }
+
+        .results-section {
+            margin-top: 30px;
+            padding: 30px;
+            background: #f8f9fa;
+            border-radius: 15px;
+            display: none;
+        }
+
+        .result-card {
+            background: white;
+            padding: 25px;
+            border-radius: 15px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .disease-name {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .confidence {
+            font-size: 1.2em;
+            color: #4facfe;
+            font-weight: bold;
+            margin-bottom: 15px;
+        }
+
+        .info-section {
+            margin-top: 20px;
+        }
+
+        .info-section h3 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 1.2em;
+        }
+
+        .info-section p, .info-section ul {
+            color: #666;
+            line-height: 1.6;
+        }
+
+        .info-section ul {
+            margin-left: 20px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            display: none;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #4facfe;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error {
+            background: #ffebee;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+            display: none;
+            white-space: pre-line;
+        }
+
+        .success {
+            background: #e8f5e8;
+            color: #2e7d32;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+            display: none;
+            white-space: pre-line;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🐕 Dog Skin Disease Prediction</h1>
+            <p>Upload an image of your dog's skin condition for AI-powered diagnosis</p>
+        </div>
+
+        <div class="content">
+            <div class="upload-section">
+                <div class="upload-area" id="uploadArea">
+                    <div class="upload-icon">📸</div>
+                    <h3>Click to upload or drag & drop</h3>
+                    <p>Supports JPG, PNG, JPEG formats</p>
+                    <input type="file" id="fileInput" accept="image/*">
+                </div>
+                
+                <button class="btn" id="predictBtn" disabled>🔍 Predict Disease</button>
+                <button class="btn" id="clearBtn">🗑️ Clear Image</button>
+            </div>
+
+            <div class="preview-section">
+                <img id="imagePreview" alt="Preview of uploaded image">
+            </div>
+
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <h3>Analyzing image...</h3>
+                <p>Please wait while our AI examines the image</p>
+            </div>
+
+            <div class="error" id="error"></div>
+            <div class="success" id="success"></div>
+
+            <div class="results-section" id="results">
+                <div class="result-card">
+                    <div class="disease-name" id="diseaseName"></div>
+                    <div class="confidence" id="confidence"></div>
+                    
+                    <div class="info-section">
+                        <h3>📋 Description</h3>
+                        <p id="description"></p>
+                    </div>
+
+                    <div class="info-section">
+                        <h3>🔍 Symptoms</h3>
+                        <ul id="symptoms"></ul>
+                    </div>
+
+                    <div class="info-section">
+                        <h3>🦠 Causes</h3>
+                        <ul id="causes"></ul>
+                    </div>
+
+                    <div class="info-section">
+                        <h3>💊 Treatment</h3>
+                        <ul id="treatment"></ul>
+                    </div>
+
+                    <div class="info-section">
+                        <h3>🏥 When to See a Vet</h3>
+                        <p id="whenToSeeVet"></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const imagePreview = document.getElementById('imagePreview');
+        const predictBtn = document.getElementById('predictBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const loading = document.getElementById('loading');
+        const results = document.getElementById('results');
+        const error = document.getElementById('error');
+        const success = document.getElementById('success');
+        const apiBaseUrl = window.location.protocol === 'file:' ? 'http://127.0.0.1:5001' : window.location.origin;
+        const maxUploadMb = 12;
+        const supportedTypes = new Set(['image/jpeg', 'image/png']);
+        const supportedExtensions = ['.jpg', '.jpeg', '.png'];
+
+        let selectedFile = null;
+
+        // Upload area click handler
+        uploadArea.addEventListener('click', () => fileInput.click());
+
+        // File input change handler
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                handleFileSelect(file);
+            }
+        });
+
+        // Drag and drop handlers
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            
+            const file = e.dataTransfer.files[0];
+            if (file) {
+                handleFileSelect(file);
+            }
+        });
+
+        // Clear button handler
+        clearBtn.addEventListener('click', clearImage);
+
+        // Predict button handler
+        predictBtn.addEventListener('click', makePrediction);
+
+        function handleFileSelect(file) {
+            clearResults();
+
+            if (!isSupportedImage(file)) {
+                showError('Unsupported file type. Please upload a JPG or PNG image.');
+                resetSelectedFile();
+                return;
+            }
+
+            if (file.size > maxUploadMb * 1024 * 1024) {
+                showError(`Image is too large. Please choose a file under ${maxUploadMb} MB.`);
+                resetSelectedFile();
+                return;
+            }
+
+            selectedFile = file;
+            const reader = new FileReader();
+            
+            reader.onload = (e) => {
+                imagePreview.src = e.target.result;
+                imagePreview.style.display = 'block';
+                predictBtn.disabled = false;
+            };
+            
+            reader.readAsDataURL(file);
+        }
+
+        function clearImage() {
+            resetSelectedFile();
+            clearResults();
+        }
+
+        function resetSelectedFile() {
+            selectedFile = null;
+            fileInput.value = '';
+            imagePreview.style.display = 'none';
+            predictBtn.disabled = true;
+        }
+
+        function clearResults() {
+            results.style.display = 'none';
+            error.style.display = 'none';
+            success.style.display = 'none';
+        }
+
+        async function makePrediction() {
+            if (!selectedFile) return;
+
+            loading.style.display = 'block';
+            clearResults();
+            predictBtn.disabled = true;
+
+            const formData = new FormData();
+            formData.append('image', selectedFile);
+
+            try {
+                const response = await fetch(`${apiBaseUrl}/predict`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json().catch(() => ({}));
+
+                if (response.ok) {
+                    displayResults(data);
+                    success.textContent = data.warning
+                        ? `Prediction completed.\n${data.warning}`
+                        : 'Prediction completed successfully!';
+                    success.style.display = 'block';
+                } else {
+                    showApiError(data, response.status);
+                }
+            } catch (err) {
+                showError(`Error: ${err.message}`);
+            } finally {
+                loading.style.display = 'none';
+                predictBtn.disabled = false;
+            }
+        }
+
+        function displayResults(data) {
+            const details = data.details || data;
+            const diseaseName = data.predicted_disease || data.prediction || 'Unknown';
+            
+            document.getElementById('diseaseName').textContent = diseaseName;
+            document.getElementById('confidence').textContent = `Confidence: ${data.confidence}%`;
+            document.getElementById('description').textContent = details.description || 'No description available.';
+            
+            // Accept both the old nested payload and the current top-level API shape.
+            setListContent('symptoms', details.symptoms);
+            setListContent('causes', details.causes);
+            setListContent('treatment', details.treatment);
+            document.getElementById('whenToSeeVet').textContent = details.when_to_see_vet || 'Consult your veterinarian if symptoms persist.';
+
+            results.style.display = 'block';
+        }
+
+        function showError(message) {
+            error.textContent = message;
+            error.style.display = 'block';
+            success.style.display = 'none';
+        }
+
+        function showApiError(data, status) {
+            const lines = [data.error || `Prediction failed with status ${status}.`];
+
+            if (data.confidence && data.required_confidence) {
+                lines.push(`Confidence: ${data.confidence}% (required: ${data.required_confidence}%)`);
+            }
+
+            if (data.suggestion) {
+                lines.push(data.suggestion);
+            }
+
+            if (Array.isArray(data.top_predictions) && data.top_predictions.length) {
+                const top = data.top_predictions
+                    .map(item => `${item.label}: ${item.confidence}%`)
+                    .join(', ');
+                lines.push(`Closest matches: ${top}`);
+            }
+
+            showError(lines.join('\n'));
+        }
+
+        function isSupportedImage(file) {
+            const filename = file.name.toLowerCase();
+            return supportedTypes.has(file.type)
+                || supportedExtensions.some(extension => filename.endsWith(extension));
+        }
+
+        function setListContent(elementId, content) {
+            const element = document.getElementById(elementId);
+            element.innerHTML = '';
+            
+            if (Array.isArray(content)) {
+                content.forEach(item => {
+                    const li = document.createElement('li');
+                    li.textContent = item;
+                    element.appendChild(li);
+                });
+            } else if (content && typeof content === 'string') {
+                const li = document.createElement('li');
+                li.textContent = content;
+                element.appendChild(li);
+            }
+
+            if (!element.children.length) {
+                const li = document.createElement('li');
+                li.textContent = 'No information available.';
+                element.appendChild(li);
+            }
+        }
+    </script>
+</body>
+</html>
