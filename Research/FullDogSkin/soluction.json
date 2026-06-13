@@ -1,0 +1,126 @@
+{
+  "dog_skin_diseases": [
+    {
+      "name": "Demodicosis",
+      "description": "A skin condition caused by the overgrowth of Demodex mites, usually affecting puppies or immunocompromised dogs.",
+      "symptoms": [
+        "Hair loss (patchy)",
+        "Red or inflamed skin",
+        "Scaly or crusted skin",
+        "Itching in severe cases"
+      ],
+      "causes": [
+        "Overpopulation of Demodex mites",
+        "Weak immune system",
+        "Genetic predisposition"
+      ],
+      "treatment": [
+        "Medicated baths",
+        "Oral or topical anti-parasitic medications (e.g., ivermectin, moxidectin)",
+        "Antibiotics for secondary infections"
+      ],
+      "when_to_see_vet": "Seek veterinary care if you see progressive hair loss, severe inflammation, or if the dog appears uncomfortable."
+    },
+    {
+      "name": "Dermatitis",
+      "description": "A general term for skin inflammation, often caused by allergies, environmental irritants, or infections.",
+      "symptoms": [
+        "Red, inflamed skin",
+        "Itching and scratching",
+        "Skin dryness or flakiness",
+        "Hot spots"
+      ],
+      "causes": [
+        "Allergies (food, environmental)",
+        "Fleas or parasites",
+        "Chemical irritants",
+        "Bacterial or fungal infections"
+      ],
+      "treatment": [
+        "Anti-inflammatory medications",
+        "Flea control treatment",
+        "Hypoallergenic diet",
+        "Medicated shampoos"
+      ],
+      "when_to_see_vet": "Consult a veterinarian if symptoms persist for more than a few days, worsen, or cause severe itching."
+    },
+    {
+      "name": "Fungal_infections",
+      "description": "Skin infections caused by fungi, commonly yeast (Malassezia) or dermatophytes.",
+      "symptoms": [
+        "Musty odor from skin",
+        "Itching",
+        "Scaling or flaking",
+        "Red or greasy skin"
+      ],
+      "causes": [
+        "Excess moisture",
+        "Weakened immune system",
+        "Underlying allergies"
+      ],
+      "treatment": [
+        "Topical antifungal creams or shampoos",
+        "Oral antifungal medications",
+        "Managing underlying conditions"
+      ],
+      "when_to_see_vet": "Vet attention is needed if the dog shows persistent itchiness, odor, or the infection spreads."
+    },
+    {
+      "name": "Healthy",
+      "description": "Indicates the dog’s skin appears normal with no signs of disease.",
+      "symptoms": [
+        "Smooth skin",
+        "No odor",
+        "Shiny coat",
+        "No redness or irritation"
+      ],
+      "causes": [],
+      "treatment": [],
+      "when_to_see_vet": "No veterinary attention needed unless symptoms change or abnormalities appear."
+    },
+    {
+      "name": "Hypersensitivity",
+      "description": "An exaggerated immune response to allergens such as flea bites, food, or environmental factors.",
+      "symptoms": [
+        "Intense itching",
+        "Redness and swelling",
+        "Hair loss",
+        "Hot spots"
+      ],
+      "causes": [
+        "Fleas",
+        "Food proteins",
+        "Dust mites or pollens",
+        "Genetic predisposition"
+      ],
+      "treatment": [
+        "Allergy medications",
+        "Flea prevention",
+        "Elimination diet",
+        "Immunotherapy"
+      ],
+      "when_to_see_vet": "Vet visit is necessary if itching is severe or stops the dog from resting, eating, or behaving normally."
+    },
+    {
+      "name": "Ringworm",
+      "description": "A contagious fungal infection that affects the skin, hair, and nails of dogs and humans.",
+      "symptoms": [
+        "Circular patches of hair loss",
+        "Red or scaly lesions",
+        "Brittle hair",
+        "Mild itching"
+      ],
+      "causes": [
+        "Dermatophyte fungi (Microsporum, Trichophyton)",
+        "Exposure to infected animals or objects",
+        "Warm, humid environments"
+      ],
+      "treatment": [
+        "Topical antifungal creams",
+        "Oral antifungal tablets",
+        "Environmental disinfection"
+      ],
+      "when_to_see_vet": "See a vet immediately because ringworm is highly contagious to pets and humans."
+    }
+  ]
+}
