@@ -52,7 +52,7 @@ def get_best_device():
 
 # CONFIG
 DATASET_DIR = _resolve_path(os.getenv("API_DATASET_DIR", "Dataset/train"))
-MODEL_PATH = _resolve_path(os.getenv("MODEL_PATH", os.getenv("BEST_MODEL_PATH", "best_global_model.pth")))
+MODEL_PATH = _resolve_path(os.getenv("MODEL_PATH", os.getenv("BEST_MODEL_PATH", "best_efficientnet_b0_model.pth")))
 DEVICE = get_best_device()
 IMAGE_SIZE = _get_env_int("IMAGE_SIZE", 224)
 MAX_UPLOAD_MB = _get_env_int("MAX_UPLOAD_MB", 12)
@@ -143,14 +143,15 @@ def load_content_validator():
         return None, None, None
 
     try:
-        weights = models.MobileNet_V2_Weights.IMAGENET1K_V1
+        # Separate ImageNet model used only to reject obviously unrelated uploads.
+        weights = models.EfficientNet_B0_Weights.IMAGENET1K_V1
         if CONTENT_VALIDATOR_MODE == "auto" and not weights_cached(weights):
             LOGGER.info(
                 "Content validator weights are not cached; set ENABLE_CONTENT_VALIDATOR=1 to download them."
             )
             return None, None, None
 
-        validator_model = models.mobilenet_v2(weights=weights).to(DEVICE)
+        validator_model = models.efficientnet_b0(weights=weights).to(DEVICE)
         validator_model.eval()
         return validator_model, weights.transforms(), weights.meta["categories"]
     except Exception as exc:

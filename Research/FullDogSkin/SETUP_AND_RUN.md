@@ -5,7 +5,7 @@
 ### Project Summary
 **Dog Skin Disease AI Prediction System** - An intelligent veterinary diagnosis tool using:
 - **Federated Learning**: Distributed model training across multiple clients
-- **PyTorch Deep Learning**: MobileNetV2 architecture for image classification
+- **PyTorch Deep Learning**: EfficientNet-B0 architecture for image classification
 - **Flask REST API**: Backend service for predictions
 - **Flutter Mobile App**: Cross-platform frontend (iOS, Android, Web, macOS)
 - **7 Disease Classes**: demodicosis, Dermatitis, Fungal_infections, Healthy, Hypersensitivity, None, ringworm
@@ -21,7 +21,7 @@
 | **Flask** | ✓ Ready | 3.x | API framework loaded |
 | **Flutter** | ✓ Ready | 3.41.6 | Mobile app ready to build |
 | **Dataset** | ✓ Ready | 7 classes | Complete train/valid/test splits |
-| **Model** | ✓ Ready | 8.7MB | best_global_model.pth validated |
+| **Model** | ✓ Ready | EfficientNet-B0 | best_efficientnet_b0_model.pth trained |
 
 ---
 
@@ -32,7 +32,7 @@
 ✓ Core dependencies imported successfully
 ✓ Model loads without errors
 ✓ Dataset detected: 7 classes
-✓ MobileNetV2 architecture: 2,232,839 parameters
+✓ EfficientNet-B0 architecture: configured for 7 classes
 ✓ Device detection: CPU mode
 ✓ All modules: Valid Python syntax
 ```
@@ -101,8 +101,8 @@ python3 main.py
 ```
 - **Duration**: 30-60 minutes
 - **Clients**: 4 distributed training clients
-- **Rounds**: 10 communication rounds
-- **Output**: Saves best model to `best_global_model.pth`
+- **Rounds**: 12 communication rounds
+- **Output**: Saves best model to `best_efficientnet_b0_model.pth`
 - **Performance**: Federated averaging of local models
 
 ### Option 3: Run Flutter Mobile App
@@ -139,13 +139,13 @@ FullDogSkin/
 ├── FinalApi_llm.py           # API with OpenAI integration
 ├── main.py                   # Federated learning training script
 │
-├── model.py                  # MobileNetV2 model definition
+├── model.py                  # EfficientNet-B0 model definition
 ├── config.py                 # Configuration settings
 ├── data_utils.py             # Dataset loading utilities
 ├── train_utils.py            # Training functions
 ├── federated_utils.py        # Federated learning utilities
 │
-├── best_global_model.pth     # Pre-trained model (8.7MB)
+├── best_efficientnet_b0_model.pth # Generated model after training
 ├── Dataset/                  # Training data (7 disease classes)
 │   ├── train/                # Training images
 │   ├── valid/                # Validation images
@@ -180,8 +180,8 @@ python3 FinalApi_llm.py
 ### Issue: Model not loading
 **Solution:** Verify the model file exists and is valid
 ```bash
-ls -lh best_global_model.pth
-python3 -c "import torch; torch.load('best_global_model.pth'); print('✓ Model OK')"
+ls -lh best_efficientnet_b0_model.pth
+python3 -c "import torch; torch.load('best_efficientnet_b0_model.pth'); print('✓ Model OK')"
 ```
 
 ### Issue: Port 5001 already in use
@@ -217,12 +217,12 @@ Returns: HTML frontend for web-based prediction interface
 
 ## 🎯 Performance Metrics
 
-- **Model Architecture**: MobileNetV2
-- **Parameters**: 2,232,839
+- **Model Architecture**: EfficientNet-B0
+- **Parameters**: 4,016,515 after replacing the classifier head
 - **Training Method**: Federated Averaging
 - **Classes**: 7 disease categories
 - **Average Prediction Time**: < 1 second (CPU)
-- **Prediction Accuracy**: ~95% on test set (from model observation)
+- **Prediction Accuracy**: 97.44% test accuracy, 96.81% test macro accuracy
 
 ---
 

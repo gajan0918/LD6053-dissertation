@@ -1,14 +1,14 @@
 import torch
-import torch.nn as nn
-from torchvision import transforms, models
+from torchvision import transforms
 from torchvision.datasets import ImageFolder
 from PIL import Image
 import os
 from loadJson import load_disease_data
+from model import build_model as build_classifier_model
 
 # CONFIG
 DATASET_DIR = "Dataset/train"
-MODEL_PATH = "best_global_model.pth"
+MODEL_PATH = "best_efficientnet_b0_model.pth"
 IMAGE_PATH = "img_1.png"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -26,9 +26,7 @@ def load_class_names(dataset_path):
 
 # BUILD MODEL
 def build_model(num_classes):
-    model = models.mobilenet_v2(weights=None)
-    model.classifier[1] = nn.Linear(model.classifier[1].in_features, num_classes)
-    return model
+    return build_classifier_model(num_classes, pretrained=False, fine_tune_blocks=0)
 
 
 

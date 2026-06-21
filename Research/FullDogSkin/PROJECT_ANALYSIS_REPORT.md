@@ -26,7 +26,7 @@
 
 #### Core Modules - All Verified
 - ✅ `config.py` - Configuration loaded
-- ✅ `model.py` - MobileNetV2 model building works
+- ✅ `model.py` - EfficientNet-B0 model building works
 - ✅ `data_utils.py` - Dataset loading (7 classes detected)
 - ✅ `train_utils.py` - Training functions operational
 - ✅ `federated_utils.py` - Federated learning utilities ready
@@ -56,7 +56,7 @@
 ✓ Flask API files have valid Python syntax
 ✓ PyTorch 2.11.0 operational (CPU mode)
 ✓ Dataset structure valid: 7 classes × 3 splits (train/valid/test)
-✓ MobileNetV2 model builds: 2,232,839 parameters
+✓ EfficientNet-B0 model builds for 7 classes
 ✓ DEVICE detection working (CPU on this system)
 ```
 
@@ -105,7 +105,7 @@
 | API Syntax | ✅ PASS | All 3 API files valid |
 | PyTorch Setup | ✅ PASS | v2.11.0, CPU device ready |
 | Dataset | ✅ PASS | 7 classes × 3 splits detected |
-| Model Building | ✅ PASS | MobileNetV2 - 2.2M parameters |
+| Model Building | ✅ PASS | EfficientNet-B0 classifier |
 
 ### Flutter Frontend Tests
 | Component | Status | Details |
@@ -125,7 +125,7 @@
 cd /Users/gajan/Desktop/Research/FullDogSkin
 python3 main.py
 ```
-Expected: Federated learning training loop with 10 rounds, 4 clients
+Expected: Federated learning training loop with 12 rounds, 4 clients
 
 ### Python Backend (API Server)
 ```bash
@@ -176,7 +176,7 @@ FullDogSkin/
 ├── loadJson.py              ✅ OK
 ├── frontend.html            ✅ OK
 ├── soluction.json           ✅ OK
-├── best_global_model.pth    ✅ Model checkpoint
+├── best_efficientnet_b0_model.pth    ✅ Trained EfficientNet-B0 checkpoint
 ├── Dataset/                 ✅ 7 classes
 └── new_app/                 ✅ FIXED Flutter app
     ├── pubspec.yaml         ✅ Fixed http version
@@ -205,11 +205,12 @@ FullDogSkin/
 
 ### Federated Learning Config
 - Clients: 4
-- Local Epochs: 200
-- Communication Rounds: 10
-- Batch Size: 16
-- Learning Rate: 0.0005
-- Optimizer: Adam with StepLR scheduler
+- Local Epochs: 3
+- Communication Rounds: 12
+- Batch Size: 32
+- Head Learning Rate: 0.001
+- Backbone Learning Rate: 0.0001
+- Optimizer: AdamW with cosine annealing scheduler
 
 ---
 
@@ -251,7 +252,7 @@ FullDogSkin/
 
 ## 📝 Notes
 
-- Model file `best_global_model.pth` should be present or train with `main.py` first
+- Model file `best_efficientnet_b0_model.pth` is present and used as the active checkpoint
 - Dataset must have structure: `Dataset/{train,valid,test}/{class_name}/`
 - OpenAI integration (FinalApi_llm.py) is optional - works without API key
 - Print statement warning in Flutter is non-critical and can be ignored for MVP

@@ -18,8 +18,8 @@ cd /Users/gajan/Desktop/Research/FullDogSkin
 python3 main.py
 ```
 - Trains model across 4 distributed clients
-- Runs 10 communication rounds
-- Saves best model to `best_global_model.pth`
+- Runs 12 communication rounds
+- Saves best model to `best_efficientnet_b0_model.pth`
 - Expected time: ~30-60 minutes
 
 ### Option 2: Run API Server (with trained model)
@@ -98,7 +98,7 @@ flutter run -d macos
 
 ## ⚠️ Important Notes
 
-- Model file `best_global_model.pth` must exist (or train first)
+- Model file `best_efficientnet_b0_model.pth` exists and is the active EfficientNet-B0 checkpoint
 - OpenAI API key is optional (set via `OPENAI_API_KEY` env var)
 - System uses CPU by default (CUDA not detected)
 - Dataset must have exactly 7 classes for model to work

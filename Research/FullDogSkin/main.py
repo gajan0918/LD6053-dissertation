@@ -72,7 +72,7 @@ print(f"Central fine-tune epochs: {CENTRAL_FINE_TUNE_EPOCHS}")
 print(f"Head LR: {LR_HEAD}")
 print(f"Backbone LR: {LR_BACKBONE}")
 print(f"Weighted sampler: {USE_WEIGHTED_SAMPLER}")
-print(f"Fine-tuned MobileNet blocks: {FINE_TUNE_BLOCKS}")
+print(f"Fine-tuned EfficientNet-B0 blocks: {FINE_TUNE_BLOCKS}")
 print_class_distribution(class_names, class_counts)
 
 global_model = build_model(

@@ -1,20 +1,20 @@
 # FullDogSkin Project - Complete Analysis & Verification Report
-**Date:** April 13, 2026  
-**Status:** ✅ **ALL SYSTEMS OPERATIONAL - ZERO ERRORS**
+**Date:** June 18, 2026  
+**Status:** EfficientNet-B0 trained and verified
 
 ---
 
 ## 📊 Executive Summary
 
-The **FullDogSkin** project is a production-ready **Federated Learning System** for dog skin disease detection. All components have been tested and verified to work without errors.
+The **FullDogSkin** project is a **Federated Learning System** for dog skin disease detection. The main disease classifier uses **EfficientNet-B0** and has been retrained successfully. The active checkpoint is `best_efficientnet_b0_model.pth`.
 
 | Component | Status | Details |
 |-----------|--------|---------|
-| **Python Backend** | ✅ PASS | All modules, APIs, training ready |
-| **ML Model** | ✅ PASS | 2.2M parameters, CPU/GPU compatible |
+| **Python Backend** | ✅ PASS | Modules and training code ready |
+| **ML Model** | ✅ PASS | EfficientNet-B0, 4,016,515 parameters |
 | **Data Pipeline** | ✅ PASS | 7 classes, fully distributed |
-| **API Server** | ✅ PASS | Both standard and LLM versions |
-| **Prediction Engine** | ✅ PASS | 93-99% confidence on real images |
+| **API Server** | ✅ PASS | Loads `best_efficientnet_b0_model.pth` successfully |
+| **Prediction Engine** | ✅ PASS | Test accuracy 97.44%, macro accuracy 96.81% |
 | **Flutter Frontend** | ✅ PASS | All lint warnings resolved |
 | **Dependencies** | ✅ PASS | All required packages installed |
 
@@ -37,12 +37,13 @@ The **FullDogSkin** project is a production-ready **Federated Learning System** 
 
 #### Configuration (config.py) ✅
 ```
-✓ DEVICE: cpu (system detected)
+✓ DEVICE: mps during training; cpu API-load verification passed
 ✓ NUM_CLIENTS: 4 (federated clients)
-✓ LOCAL_EPOCHS: 200 (client training)
-✓ ROUNDS: 10 (communication rounds)
-✓ BATCH_SIZE: 16
-✓ LEARNING_RATE: 0.0005
+✓ LOCAL_EPOCHS: 3 (client training)
+✓ ROUNDS: 12 (communication rounds)
+✓ BATCH_SIZE: 32
+✓ LR_HEAD: 0.001
+✓ LR_BACKBONE: 0.0001
 ✓ SEED: 42 (reproducibility)
 ```
 
@@ -59,30 +60,30 @@ The **FullDogSkin** project is a production-ready **Federated Learning System** 
   - ringworm
 
 ✓ Data Splits:
-  - Train: 80% across clients
-  - Valid: 10% centralized
-  - Test: 10% for evaluation
+  - Train: 3,102 images across clients
+  - Valid: 894 images centralized
+  - Test: 469 images for evaluation
 
 ✓ Client Distribution: 4 clients (federated learning)
-✓ Batch Size: 16 images per batch
+✓ Batch Size: 32 images per batch
 ```
 
 #### Model Architecture (model.py) ✅
 ```
-✓ Base Architecture: MobileNetV2 (lightweight)
-✓ Total Parameters: 2,232,839
+✓ Base Architecture: EfficientNet-B0
+✓ Total Parameters: 4,016,515
 ✓ Output Classes: 7 (dynamic)
 ✓ Device Compatibility: CPU + GPU
 ✓ Model Building: Successful without errors
 ```
 
-### 2. API Servers - All Verified ✅
+### 2. API Servers - Verified
 
 #### Standard API (api.py)
 ```
-Status: RUNNING at http://localhost:5001
+Status: Healthy with EfficientNet-B0 checkpoint loaded
 ✓ GET  / ..................... Homepage (frontend.html)
-✓ GET  /health ................ {status: healthy, ...}
+✓ GET  /health ................ Reports readiness and checkpoint status
 ✓ POST /predict ............... Image classification
 ✓ CORS ........................ Enabled for all origins
 ```
@@ -91,8 +92,10 @@ Status: RUNNING at http://localhost:5001
 ```json
 {
   "status": "healthy",
+  "ready": true,
   "model_loaded": true,
   "dataset_loaded": true,
+  "model_path": "best_efficientnet_b0_model.pth",
   "num_classes": 7,
   "device": "cpu"
 }
@@ -101,44 +104,56 @@ Status: RUNNING at http://localhost:5001
 #### Advanced API v2 (FinalApi_.py)
 ```
 ✓ Enhanced error handling
-✓ All endpoints from api.py
+✓ Uses the EfficientNet-B0 checkpoint path
 ✓ Improved response formatting
-✓ Production-ready
+✓ Ready with trained checkpoint
 ```
 
 #### LLM Enhanced API (FinalApi_llm.py)
 ```
-Status: OPERATIONAL
-✓ All standard endpoints working
+Status: Ready with trained checkpoint
+✓ Uses the EfficientNet-B0 checkpoint path
 ✓ OpenAI integration optional (graceful fallback)
 ✓ No hard dependency on OPENAI_API_KEY
 ✓ Functions with or without LLM
 ```
 
-### 3. Prediction Engine - Live Testing ✅
+### 3. Prediction Engine - Retrained Results
 
-#### Test 1: Healthy Dog
+The EfficientNet-B0 model was retrained with 12 federated rounds and 4 centralized fine-tuning epochs.
+
+#### Best Validation Result
 ```
-Image: Healthy/075_jpg.rf.f10d5301e05f89372e15d834b4ed7cee.jpg
+Round: 12/12
+Validation loss: 0.1943
+Validation accuracy: 96.32%
+Validation macro accuracy: 95.95%
+Worst validation classes:
+  - Fungal_infections: 83.5%
+  - Dermatitis: 94.9%
+  - None: 97.2%
+```
+
+#### Held-Out Test Result
+```
+Test loss: 0.1524
+Test accuracy: 97.44%
+Test macro accuracy: 96.81%
+Worst test classes:
+  - Fungal_infections: 90.7%
+  - Hypersensitivity: 93.1%
+  - Healthy: 97.1%
+```
+
+#### API Smoke Prediction
+```
+Endpoint: POST /predict
+Status code: 200
+Model path: best_efficientnet_b0_model.pth
+Sample image: Dataset/test/Healthy/images-32_jpg.rf.43251f9b65f755784df579d639cd121c.jpg
 Prediction: Healthy
-Confidence: 93.93%
-Status: ✅ CORRECT
-Response includes:
-  - Symptoms: Smooth skin, No odor, Shiny coat, No redness
-  - Treatment: None needed
-  - When to see vet: No veterinary attention needed
-```
-
-#### Test 2: Dermatitis
-```
-Image: Dermatitis/1000010494_x16_jpg.rf.ea6148c3096cad322d093d8c9202b9cd.jpg
-Prediction: Dermatitis
-Confidence: 99.86%
-Status: ✅ CORRECT
-Response includes:
-  - Symptoms: Red inflamed skin, Itching, Dryness, Hot spots
-  - Causes: Allergies, Fleas, Chemical irritants, Infections
-  - Treatment: Anti-inflammatory meds, Flea control, Diet change, Medicated shampoo
+Confidence: 79.7%
+Status: PASS
 ```
 
 ### 4. Training Infrastructure ✅
@@ -146,9 +161,9 @@ Response includes:
 #### Federated Learning Setup
 ```
 ✓ 4 distributed clients configured
-✓ 10 communication rounds
-✓ 200 local epochs per client
-✓ Learning rate: 0.0005
+✓ 12 communication rounds
+✓ 3 local epochs per client
+✓ Head learning rate: 0.001
 ✓ Parameter averaging implemented
 ```
 
@@ -182,13 +197,22 @@ Response includes:
 
 ------
 
-## 🚀 HOW TO RUN - VERIFIED COMMANDS
+## 🚀 HOW TO RUN
 
-### Option 1: API Server (CURRENTLY RUNNING)
+### Option 1: Train the Model (Federated Learning)
 ```bash
-cd /Users/gajan/Desktop/Research/FullDogSkin
+cd /Users/gajan/Desktop/LD6053-dissertation/Research/FullDogSkin
+python3 main.py
+# Expected: 12 rounds x 4 clients
+# Time: ~30-60 minutes on CPU
+# Output: best_efficientnet_b0_model.pth
+```
+
+### Option 2: API Server (After Training)
+```bash
+cd /Users/gajan/Desktop/LD6053-dissertation/Research/FullDogSkin
 python3 api.py
-# Server running at http://localhost:5001
+# Server runs at http://localhost:5001
 ```
 
 **Test the API:**
@@ -201,20 +225,11 @@ curl -X POST http://localhost:5001/predict \
   -F "image=@path/to/image.jpg"
 ```
 
-### Option 2: API with LLM Features
+### Option 3: API with LLM Features
 ```bash
 export OPENAI_API_KEY="your-key-here"
 python3 FinalApi_llm.py
 # All predictions enhanced with LLM summaries
-```
-
-### Option 3: Train the Model (Federated Learning)
-```bash
-cd /Users/gajan/Desktop/Research/FullDogSkin
-python3 main.py
-# Expected: 10 rounds × 4 clients
-# Time: ~30-60 minutes on CPU
-# Output: Updated best_global_model.pth
 ```
 
 ### Option 4: Flutter Mobile App
@@ -237,18 +252,18 @@ flutter run -d macos
 
 - [x] Python version compatible (3.13.3+)
 - [x] All dependencies installed (requirements.txt)
-- [x] PyTorch correctly detected device (CPU available)
+- [x] PyTorch correctly detected device (MPS used for training, CPU verified for API load)
 - [x] Dataset loaded with 7 classes
-- [x] Model parameters: 2,232,839 (correct)
-- [x] Both API versions working
-- [x] Health endpoint returning correct status
-- [x] Prediction endpoint works with real images
-- [x] Confidence scores in expected range (93-99%)
-- [x] Disease information loading correctly
+- [x] Model parameters: 4,016,515 (EfficientNet-B0 with 7 classes)
+- [x] Trained `best_efficientnet_b0_model.pth`
+- [x] API health check returns healthy with model loaded
+- [x] Prediction endpoint works with a held-out test image
+- [x] Held-out test accuracy recorded
+- [x] Held-out test macro accuracy recorded
 - [x] Federated learning components ready
 - [x] Training script syntax valid
+- [x] Disease information loading correctly
 - [x] Flutter dependencies resolved
-- [x] No critical errors or warnings
 
 ---
 
@@ -256,12 +271,14 @@ flutter run -d macos
 
 | Metric | Value |
 |--------|-------|
-| API Response Time | <500ms per prediction |
-| Model Inference | ~200ms (CPU) |
-| Prediction Confidence | 93-99% range |
-| Model Size | 8.7 MB |
+| Best Validation Accuracy | 96.32% |
+| Best Validation Macro Accuracy | 95.95% |
+| Test Accuracy | 97.44% |
+| Test Macro Accuracy | 96.81% |
+| Test Loss | 0.1524 |
+| Model Size | 16 MB |
 | Dataset Classes | 7 |
-| Total Trainable Parameters | 2,232,839 |
+| Total Parameters | 4,016,515 |
 | System Memory | < 2GB for inference |
 
 ---
@@ -292,21 +309,21 @@ kill -9 <PID>  # Kill it
 
 ```
 ╔═══════════════════════════════════════╗
-║   ✅ PROJECT FULLY OPERATIONAL        ║
-║   ✅ ZERO ERRORS DETECTED             ║
-║   ✅ READY FOR PRODUCTION USE          ║
-║   ✅ ALL COMPONENTS VERIFIED           ║
+║   EFFICIENTNET-B0 MODEL ACTIVE        ║
+║   TRAINING COMPLETE                   ║
+║   API LOAD VERIFIED                   ║
+║   TEST ACCURACY: 97.44%               ║
 ╚═══════════════════════════════════════╝
 ```
 
 **Next Steps:**
-1. Run the API: `python3 api.py` (already running)
-2. Test predictions: Submit images via `/predict` endpoint
-3. Or start training: `python3 main.py` to improve model
-4. Or deploy Flutter app: `flutter run -d chrome`
+1. Run the API: `python3 api.py`
+2. Test uploaded images through `/predict`
+3. Use `best_efficientnet_b0_model.pth` as the active checkpoint
+4. Keep `archived_models/legacy_previous_checkpoint.pth` only as a historical backup
 
 ---
 
-**Report Generated:** 2026-04-13  
-**Verified By:** Automated Testing Suite  
-**Status:** ✅ PASS - All tests completed successfully
+**Report Updated:** 2026-06-18  
+**Verified By:** Codex-assisted code review  
+**Status:** EfficientNet-B0 replacement complete; training and API load verified
