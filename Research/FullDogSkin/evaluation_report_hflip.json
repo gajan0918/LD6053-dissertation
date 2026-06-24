@@ -1,0 +1,140 @@
+{
+  "split": "test",
+  "num_samples": 469,
+  "num_classes": 7,
+  "temperature": 0.775698,
+  "tta_mode": "hflip",
+  "accuracy": 0.9744,
+  "top3_accuracy": 0.9936,
+  "macro_precision": 0.9724,
+  "macro_recall": 0.9668,
+  "macro_f1": 0.9694,
+  "expected_calibration_error": 0.0226,
+  "per_class": [
+    {
+      "class": "Dermatitis",
+      "support": 66,
+      "precision": 0.9701,
+      "recall": 0.9848,
+      "f1": 0.9774
+    },
+    {
+      "class": "Fungal_infections",
+      "support": 54,
+      "precision": 0.9615,
+      "recall": 0.9259,
+      "f1": 0.9434
+    },
+    {
+      "class": "Healthy",
+      "support": 69,
+      "precision": 0.9306,
+      "recall": 0.971,
+      "f1": 0.9504
+    },
+    {
+      "class": "Hypersensitivity",
+      "support": 29,
+      "precision": 0.9643,
+      "recall": 0.931,
+      "f1": 0.9474
+    },
+    {
+      "class": "None",
+      "support": 36,
+      "precision": 1.0,
+      "recall": 0.9722,
+      "f1": 0.9859
+    },
+    {
+      "class": "demodicosis",
+      "support": 100,
+      "precision": 0.9804,
+      "recall": 1.0,
+      "f1": 0.9901
+    },
+    {
+      "class": "ringworm",
+      "support": 115,
+      "precision": 1.0,
+      "recall": 0.9826,
+      "f1": 0.9912
+    }
+  ],
+  "confusion_matrix": {
+    "labels": [
+      "Dermatitis",
+      "Fungal_infections",
+      "Healthy",
+      "Hypersensitivity",
+      "None",
+      "demodicosis",
+      "ringworm"
+    ],
+    "matrix": [
+      [
+        65,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        50,
+        1,
+        1,
+        0,
+        2,
+        0
+      ],
+      [
+        1,
+        1,
+        67,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        2,
+        27,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        1,
+        0,
+        35,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        100,
+        0
+      ],
+      [
+        1,
+        0,
+        1,
+        0,
+        0,
+        0,
+        113
+      ]
+    ]
+  }
+}

@@ -44,6 +44,15 @@ def log_metrics(label, metrics):
         print(f"Worst class accuracy: {summary}")
 
 
+def load_checkpoint_state(model, model_path):
+    checkpoint = torch.load(model_path, map_location=DEVICE)
+    if isinstance(checkpoint, dict) and "state_dict" in checkpoint:
+        checkpoint = checkpoint["state_dict"]
+    if isinstance(checkpoint, dict) and all(key.startswith("module.") for key in checkpoint):
+        checkpoint = {key.removeprefix("module."): value for key, value in checkpoint.items()}
+    model.load_state_dict(checkpoint)
+
+
 seed_everything(SEED)
 
 train_loader, client_loaders, valid_loader, test_loader, metadata = get_data_loaders(
@@ -55,6 +64,8 @@ train_loader, client_loaders, valid_loader, test_loader, metadata = get_data_loa
     image_size=IMAGE_SIZE,
     class_weight_power=CLASS_WEIGHT_POWER,
     use_weighted_sampler=USE_WEIGHTED_SAMPLER,
+    focus_class_name=FOCUS_CLASS_NAME,
+    focus_class_weight_multiplier=FOCUS_CLASS_WEIGHT_MULTIPLIER,
 )
 
 num_classes = metadata["num_classes"]
@@ -72,14 +83,24 @@ print(f"Central fine-tune epochs: {CENTRAL_FINE_TUNE_EPOCHS}")
 print(f"Head LR: {LR_HEAD}")
 print(f"Backbone LR: {LR_BACKBONE}")
 print(f"Weighted sampler: {USE_WEIGHTED_SAMPLER}")
+print(f"Pretrained ImageNet initialization: {PRETRAINED}")
 print(f"Fine-tuned EfficientNet-B0 blocks: {FINE_TUNE_BLOCKS}")
+if FOCUS_CLASS_NAME:
+    print(
+        f"Focus class: {FOCUS_CLASS_NAME} "
+        f"(weight multiplier={FOCUS_CLASS_WEIGHT_MULTIPLIER})"
+    )
 print_class_distribution(class_names, class_counts)
 
 global_model = build_model(
     num_classes,
-    pretrained=True,
+    pretrained=PRETRAINED,
     fine_tune_blocks=FINE_TUNE_BLOCKS,
 ).to(DEVICE)
+
+if RESUME_MODEL_PATH:
+    print(f"Loading checkpoint for resume/fine-tuning: {RESUME_MODEL_PATH}")
+    load_checkpoint_state(global_model, RESUME_MODEL_PATH)
 
 best_score = float("-inf")
 best_model_path = BEST_MODEL_PATH
@@ -159,7 +180,7 @@ for round_idx in range(1, ROUNDS + 1):
             break
 
 if os.path.exists(best_model_path):
-    global_model.load_state_dict(torch.load(best_model_path, map_location=DEVICE))
+    load_checkpoint_state(global_model, best_model_path)
 
 if CENTRAL_FINE_TUNE_EPOCHS > 0:
     print("\nStarting centralized fine-tuning on the full training set...\n")
@@ -188,7 +209,7 @@ if CENTRAL_FINE_TUNE_EPOCHS > 0:
         )
 
 if os.path.exists(best_model_path):
-    global_model.load_state_dict(torch.load(best_model_path, map_location=DEVICE))
+    load_checkpoint_state(global_model, best_model_path)
 
 test_metrics = evaluate_model(global_model, test_loader, DEVICE, num_classes, class_names)
 print("\nFinal evaluation on the held-out test set:")

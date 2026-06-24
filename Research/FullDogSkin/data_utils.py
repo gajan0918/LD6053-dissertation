@@ -90,6 +90,8 @@ def get_data_loaders(
     image_size=224,
     class_weight_power=0.5,
     use_weighted_sampler=True,
+    focus_class_name="",
+    focus_class_weight_multiplier=1.0,
 ):
     train_transform = build_train_transform(image_size)
     eval_transform = build_eval_transform(image_size)
@@ -100,6 +102,15 @@ def get_data_loaders(
 
     num_classes = len(train_dataset.classes)
     class_weights = compute_class_weights(train_dataset.targets, num_classes, class_weight_power)
+    if focus_class_name and focus_class_weight_multiplier != 1.0:
+        if focus_class_name not in train_dataset.class_to_idx:
+            raise ValueError(
+                f"Focus class '{focus_class_name}' was not found. "
+                f"Available classes: {train_dataset.classes}"
+            )
+        focus_idx = train_dataset.class_to_idx[focus_class_name]
+        class_weights[focus_idx] *= focus_class_weight_multiplier
+
     client_indices = split_indices_stratified(train_dataset.targets, num_clients, seed)
 
     client_loaders = []
@@ -135,6 +146,8 @@ def get_data_loaders(
         "class_names": train_dataset.classes,
         "class_counts": dict(Counter(train_dataset.targets)),
         "class_weights": class_weights,
+        "focus_class_name": focus_class_name,
+        "focus_class_weight_multiplier": focus_class_weight_multiplier,
     }
 
     return train_loader, client_loaders, valid_loader, test_loader, metadata

@@ -1,16 +1,20 @@
+import base64
 import io
 import logging
 import os
 from pathlib import Path
 from urllib.parse import urlparse
 
+import numpy as np
 import torch
+import torch.nn.functional as F
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from PIL import Image, UnidentifiedImageError
 from torchvision import models, transforms
 from werkzeug.exceptions import RequestEntityTooLarge
 
+from inference_utils import build_prediction_tensor_batch, normalize_tta_mode
 from loadJson import load_disease_data
 from model import build_model as build_classifier_model
 
@@ -60,11 +64,20 @@ MIN_IMAGE_DIMENSION = _get_env_int("MIN_IMAGE_DIMENSION", 64)
 MAX_IMAGE_DIMENSION = _get_env_int("MAX_IMAGE_DIMENSION", 10000)
 MAX_IMAGE_PIXELS = _get_env_int("MAX_IMAGE_PIXELS", 60_000_000)
 LOW_CONFIDENCE_THRESHOLD = _get_env_float("LOW_CONFIDENCE_THRESHOLD", 0.75)
+SOFTMAX_TEMPERATURE = max(_get_env_float("SOFTMAX_TEMPERATURE", 0.772956), 1e-6)
+PREDICTION_TTA_MODE = normalize_tta_mode(os.getenv("PREDICTION_TTA_MODE", "five_crop"))
+ENABLE_NONE_GUARD = _get_env_bool("ENABLE_NONE_GUARD", True)
+NONE_GUARD_TTA_MODE = normalize_tta_mode(os.getenv("NONE_GUARD_TTA_MODE", "none"))
+NONE_GUARD_TEMPERATURE = max(_get_env_float("NONE_GUARD_TEMPERATURE", 0.775777), 1e-6)
 NONE_CLASS_NAME = os.getenv("NONE_CLASS_NAME", "None")
 NONE_REJECTION_THRESHOLD = _get_env_float("NONE_REJECTION_THRESHOLD", 0.5)
+STRICT_INVALID_NONE_THRESHOLD = _get_env_float("STRICT_INVALID_NONE_THRESHOLD", 0.35)
 SECONDARY_REJECTION_THRESHOLD = _get_env_float("SECONDARY_REJECTION_THRESHOLD", 0.2)
 AUX_DOG_RESCUE_THRESHOLD = _get_env_float("AUX_DOG_RESCUE_THRESHOLD", 0.9)
 CONTENT_VALIDATOR_MODE = os.getenv("ENABLE_CONTENT_VALIDATOR", "auto").strip().lower()
+ENABLE_EXPLAINABILITY = _get_env_bool("ENABLE_EXPLAINABILITY", True)
+EXPLANATION_MAX_SIDE = _get_env_int("EXPLANATION_MAX_SIDE", 640)
+EXPLANATION_ALPHA = min(max(_get_env_float("EXPLANATION_ALPHA", 0.45), 0.0), 1.0)
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 DOG_BREED_CLASS_INDICES = list(range(151, 269))
 AUX_NON_DOG_LABELS = {
@@ -223,6 +236,14 @@ def health():
         "device": str(DEVICE),
         "content_validator_loaded": content_validator_model is not None,
         "content_validator_mode": CONTENT_VALIDATOR_MODE,
+        "softmax_temperature": SOFTMAX_TEMPERATURE,
+        "confidence_calibrated": SOFTMAX_TEMPERATURE != 1.0,
+        "prediction_tta_mode": PREDICTION_TTA_MODE,
+        "none_guard_enabled": ENABLE_NONE_GUARD,
+        "none_guard_tta_mode": NONE_GUARD_TTA_MODE,
+        "none_guard_temperature": NONE_GUARD_TEMPERATURE,
+        "strict_invalid_none_threshold": STRICT_INVALID_NONE_THRESHOLD,
+        "explainability_enabled": ENABLE_EXPLAINABILITY,
     }
     if startup_error:
         response["startup_error"] = startup_error
@@ -243,12 +264,37 @@ def predict():
 
     try:
         img = load_request_image(request.files["image"])
-        pred, conf, probabilities = predict_image(img, model, class_names)
+        pred, conf, probabilities, pred_idx = predict_image(img, model, class_names)
         top_predictions = get_top_predictions(probabilities, class_names)
         none_prob = float(probabilities[none_class_idx].item()) if none_class_idx is not None else 0.0
+        none_guard = get_none_guard_result(img)
+        if none_guard:
+            none_prob = max(none_prob, none_guard["none_prob"])
+            if none_guard["is_none"]:
+                pred = NONE_CLASS_NAME
+                conf = none_guard["confidence"]
+                probabilities = none_guard["probabilities"]
+                top_predictions = get_top_predictions(probabilities, class_names)
         dog_score, aux_label, aux_conf = get_aux_content_signals(img)
 
         if pred == NONE_CLASS_NAME or none_prob >= NONE_REJECTION_THRESHOLD:
+            if dog_score is not None and dog_score >= AUX_DOG_RESCUE_THRESHOLD:
+                return jsonify(build_uncertain_dog_response(
+                    none_prob,
+                    dog_score,
+                    aux_label,
+                    aux_conf,
+                    top_predictions,
+                )), 422
+            return jsonify(build_invalid_content_response(
+                none_prob,
+                dog_score,
+                aux_label,
+                aux_conf,
+                top_predictions,
+            )), 422
+
+        if none_prob >= STRICT_INVALID_NONE_THRESHOLD:
             if dog_score is not None and dog_score >= AUX_DOG_RESCUE_THRESHOLD:
                 return jsonify(build_uncertain_dog_response(
                     none_prob,
@@ -282,7 +328,11 @@ def predict():
             return jsonify(build_low_confidence_response(pred, conf, top_predictions)), 422
 
         info = get_disease_info(pred, disease_data)
-        return jsonify(build_success_response(pred, conf, info, top_predictions))
+        response = build_success_response(pred, conf, info, top_predictions)
+        explanation = build_explanation_response(img, pred_idx)
+        if explanation:
+            response["explanation"] = explanation
+        return jsonify(response)
 
     except ValueError as exc:
         return jsonify({"status": "bad_request", "error": str(exc)}), 400
@@ -363,6 +413,7 @@ def build_invalid_content_response(none_prob, dog_score, aux_label=None, aux_con
         "none_confidence": round(none_prob * 100, 2),
         "top_predictions": top_predictions or [],
     }
+    add_confidence_metadata(response)
     add_validator_fields(response, dog_score, aux_label, aux_conf)
     return response
 
@@ -375,12 +426,13 @@ def build_uncertain_dog_response(none_prob, dog_score, aux_label=None, aux_conf=
         "none_confidence": round(none_prob * 100, 2),
         "top_predictions": top_predictions or [],
     }
+    add_confidence_metadata(response)
     add_validator_fields(response, dog_score, aux_label, aux_conf)
     return response
 
 
 def build_low_confidence_response(prediction, confidence, top_predictions):
-    return {
+    response = {
         "status": "low_confidence",
         "error": "Prediction confidence is too low to show a reliable result.",
         "suggestion": "Use a sharper, closer, well-lit image of the affected skin area.",
@@ -390,6 +442,8 @@ def build_low_confidence_response(prediction, confidence, top_predictions):
         "required_confidence": round(LOW_CONFIDENCE_THRESHOLD * 100, 2),
         "top_predictions": top_predictions,
     }
+    add_confidence_metadata(response)
+    return response
 
 
 def add_validator_fields(response, dog_score, aux_label, aux_conf):
@@ -399,6 +453,18 @@ def add_validator_fields(response, dog_score, aux_label, aux_conf):
         response["validator_label"] = aux_label
     if aux_conf is not None:
         response["validator_confidence"] = round(aux_conf * 100, 2)
+
+
+def add_confidence_metadata(response):
+    response["confidence_method"] = "softmax"
+    response["softmax_temperature"] = round(SOFTMAX_TEMPERATURE, 6)
+    response["confidence_calibrated"] = SOFTMAX_TEMPERATURE != 1.0
+    response["prediction_tta_mode"] = PREDICTION_TTA_MODE
+    response["none_guard_enabled"] = ENABLE_NONE_GUARD
+    if ENABLE_NONE_GUARD:
+        response["none_guard_tta_mode"] = NONE_GUARD_TTA_MODE
+        response["none_guard_temperature"] = round(NONE_GUARD_TEMPERATURE, 6)
+        response["strict_invalid_none_threshold"] = round(STRICT_INVALID_NONE_THRESHOLD, 6)
 
 
 def build_success_response(prediction, confidence, info, top_predictions):
@@ -414,22 +480,154 @@ def build_success_response(prediction, confidence, info, top_predictions):
         "when_to_see_vet": info.get("when_to_see_vet", "") if info else "",
         "top_predictions": top_predictions,
     }
+    add_confidence_metadata(response)
     return response
 
 
 def predict_image(image_pil, model_instance, labels):
-    tensor = transform(image_pil).unsqueeze(0).to(DEVICE)
+    return predict_with_tta(
+        image_pil,
+        model_instance,
+        labels,
+        PREDICTION_TTA_MODE,
+        SOFTMAX_TEMPERATURE,
+    )
+
+
+def get_none_guard_result(image_pil):
+    if not ENABLE_NONE_GUARD or none_class_idx is None:
+        return None
+
+    pred, conf, probabilities, _pred_idx = predict_with_tta(
+        image_pil,
+        model,
+        class_names,
+        NONE_GUARD_TTA_MODE,
+        NONE_GUARD_TEMPERATURE,
+    )
+    none_prob = float(probabilities[none_class_idx].item())
+    return {
+        "is_none": pred == NONE_CLASS_NAME or none_prob >= NONE_REJECTION_THRESHOLD,
+        "prediction": pred,
+        "confidence": conf,
+        "none_prob": none_prob,
+        "probabilities": probabilities,
+    }
+
+
+def predict_with_tta(image_pil, model_instance, labels, tta_mode, temperature):
+    tensor_batch = build_prediction_tensor_batch(
+        image_pil,
+        IMAGE_SIZE,
+        tta_mode,
+    ).to(DEVICE)
 
     model_instance.eval()
     with torch.no_grad():
-        output = model_instance(tensor)
-        probs = torch.softmax(output, dim=1)
+        output = model_instance(tensor_batch).mean(dim=0, keepdim=True)
+        probs = torch.softmax(output / temperature, dim=1)
         conf, pred_class = probs.max(1)
 
-    predicted_name = labels[pred_class.item()]
+    predicted_index = int(pred_class.item())
+    predicted_name = labels[predicted_index]
     confidence_value = float(conf.item())
     probabilities = probs[0].detach().cpu()
-    return predicted_name, confidence_value, probabilities
+    return predicted_name, confidence_value, probabilities, predicted_index
+
+
+def build_explanation_response(image_pil, target_index):
+    if not ENABLE_EXPLAINABILITY:
+        return None
+
+    try:
+        overlay = build_grad_cam_overlay(image_pil, model, target_index)
+        return {
+            "type": "grad_cam",
+            "target_class": class_names[target_index],
+            "image_mime": "image/png",
+            "image_base64": encode_png_base64(overlay),
+        }
+    except Exception as exc:
+        LOGGER.warning("Grad-CAM explanation unavailable: %s", exc)
+        return None
+
+
+def build_grad_cam_overlay(image_pil, model_instance, target_index):
+    target_layer = get_grad_cam_target_layer(model_instance)
+    activations = {}
+    gradients = {}
+
+    def forward_hook(_module, _inputs, output):
+        activations["value"] = output
+
+    def backward_hook(_module, _grad_input, grad_output):
+        gradients["value"] = grad_output[0]
+
+    forward_handle = target_layer.register_forward_hook(forward_hook)
+    backward_handle = target_layer.register_full_backward_hook(backward_hook)
+
+    try:
+        tensor = transform(image_pil).unsqueeze(0).to(DEVICE)
+        tensor.requires_grad_(True)
+        model_instance.zero_grad(set_to_none=True)
+
+        with torch.enable_grad():
+            output = model_instance(tensor)
+            score = output[0, target_index]
+            score.backward()
+
+        if "value" not in activations or "value" not in gradients:
+            raise RuntimeError("Unable to capture model activations for explanation.")
+
+        activation = activations["value"].detach()
+        gradient = gradients["value"].detach()
+        weights = gradient.mean(dim=(2, 3), keepdim=True)
+        cam = F.relu((weights * activation).sum(dim=1, keepdim=True))
+        cam = F.interpolate(
+            cam,
+            size=(image_pil.height, image_pil.width),
+            mode="bilinear",
+            align_corners=False,
+        )[0, 0]
+
+        cam = cam - cam.min()
+        max_value = cam.max()
+        if max_value <= 0:
+            raise RuntimeError("Explanation heatmap was empty.")
+        heatmap = (cam / max_value).detach().cpu().numpy()
+        return overlay_heatmap(image_pil, heatmap)
+    finally:
+        forward_handle.remove()
+        backward_handle.remove()
+
+
+def get_grad_cam_target_layer(model_instance):
+    features = getattr(model_instance, "features", None)
+    if features is None or len(features) == 0:
+        raise RuntimeError("Model does not expose EfficientNet feature layers.")
+    return features[-1]
+
+
+def overlay_heatmap(image_pil, heatmap):
+    base = image_pil.convert("RGBA")
+    heatmap = np.clip(heatmap, 0.0, 1.0)
+
+    colored = np.zeros((*heatmap.shape, 4), dtype=np.uint8)
+    colored[..., 0] = 255
+    colored[..., 1] = (heatmap * 180).astype(np.uint8)
+    colored[..., 3] = (heatmap * 255 * EXPLANATION_ALPHA).astype(np.uint8)
+
+    heatmap_image = Image.fromarray(colored, mode="RGBA")
+    return Image.alpha_composite(base, heatmap_image).convert("RGB")
+
+
+def encode_png_base64(image_pil):
+    preview = image_pil.copy()
+    preview.thumbnail((EXPLANATION_MAX_SIDE, EXPLANATION_MAX_SIDE), Image.Resampling.LANCZOS)
+
+    buffer = io.BytesIO()
+    preview.save(buffer, format="PNG")
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
 def get_top_predictions(probabilities, labels, limit=3):
