@@ -30,7 +30,10 @@ def log_metrics(label, metrics):
     print(
         f"{label} loss={metrics['loss']:.4f} "
         f"acc={metrics['accuracy']*100:.2f}% "
-        f"macro_acc={metrics['macro_accuracy']*100:.2f}%"
+        f"macro_acc={metrics['macro_accuracy']*100:.2f}% "
+        f"precision={metrics['macro_precision']*100:.2f}% "
+        f"recall/sensitivity={metrics['macro_recall']*100:.2f}% "
+        f"f1={metrics['macro_f1']*100:.2f}%"
     )
     worst_classes = sorted(
         metrics["per_class_accuracy"].items(),
@@ -42,6 +45,56 @@ def log_metrics(label, metrics):
             for name, score in worst_classes
         )
         print(f"Worst class accuracy: {summary}")
+
+
+def print_classification_report(label, metrics, class_names):
+    print("\n" + "=" * 80)
+    print(f"{label.upper()} CLASSIFICATION METRICS")
+    print("=" * 80)
+    print(f"Accuracy             : {metrics['accuracy'] * 100:.2f}%")
+    print(f"Macro Precision      : {metrics['macro_precision'] * 100:.2f}%")
+    print(f"Macro Recall         : {metrics['macro_recall'] * 100:.2f}%")
+    print(f"Macro Sensitivity    : {metrics['macro_sensitivity'] * 100:.2f}%")
+    print(f"Macro F1 Score       : {metrics['macro_f1'] * 100:.2f}%")
+
+    print("\nClassification Report:")
+    print(
+        f"{'Class':25}"
+        f"{'Precision':>12}"
+        f"{'Recall':>12}"
+        f"{'Sensitivity':>14}"
+        f"{'F1 Score':>12}"
+        f"{'Support':>10}"
+    )
+    print("-" * 85)
+    for item in metrics["classification_report"]:
+        print(
+            f"{item['class'][:25]:25}"
+            f"{item['precision']:>12.4f}"
+            f"{item['recall']:>12.4f}"
+            f"{item['sensitivity']:>14.4f}"
+            f"{item['f1']:>12.4f}"
+            f"{item['support']:>10}"
+        )
+
+    print("\nConfusion Matrix:")
+    print("Rows = Actual Class, Columns = Predicted Class")
+    print("\nClass Index:")
+    for index, class_name in enumerate(class_names):
+        print(f"{index}: {class_name}")
+
+    header = "Actual \\ Pred".ljust(18)
+    for index in range(len(class_names)):
+        header += f"{index:>6}"
+    print("\n" + header)
+    print("-" * len(header))
+
+    for index, row in enumerate(metrics["confusion_matrix"]):
+        row_text = f"{index} {class_names[index][:14]}".ljust(18)
+        for value in row:
+            row_text += f"{value:>6}"
+        print(row_text)
+    print("=" * 80)
 
 
 def load_checkpoint_state(model, model_path):
@@ -214,4 +267,5 @@ if os.path.exists(best_model_path):
 test_metrics = evaluate_model(global_model, test_loader, DEVICE, num_classes, class_names)
 print("\nFinal evaluation on the held-out test set:")
 log_metrics("Test", test_metrics)
+print_classification_report("Test", test_metrics, class_names)
 print(f"Best model saved to: {best_model_path}")

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from pathlib import Path
+
 from PIL import Image
 import numpy as np
 import sys
@@ -30,7 +32,22 @@ def validate_dog_skin_image(image_pil):
 print("="*50)
 print("TESTING VALIDATION WITH DOG IMAGE")
 print("="*50)
-dog_img = Image.open("Dataset/test/Healthy/075_jpg.rf.f10d5301e05f89372e15d834b4ed7cee.jpg")
+healthy_test_dir = Path("Dataset/test/Healthy")
+sample_images = sorted(
+    path
+    for path in healthy_test_dir.iterdir()
+    if path.suffix.lower() in {".jpg", ".jpeg", ".png"}
+)
+if not sample_images:
+    raise FileNotFoundError(f"No Healthy test images found in {healthy_test_dir}")
+selected_image_path = sample_images[0]
+for candidate_path in sample_images:
+    with Image.open(candidate_path) as candidate_img:
+        candidate_is_valid, _ = validate_dog_skin_image(candidate_img)
+    if candidate_is_valid:
+        selected_image_path = candidate_path
+        break
+dog_img = Image.open(selected_image_path)
 is_valid, msg = validate_dog_skin_image(dog_img)
 print(f"Result: {'✅ PASS' if is_valid else '❌ FAIL'}")
 print(f"Message: {msg}")

@@ -108,6 +108,10 @@ def evaluate_model(model, dataloader, device, num_classes, class_names=None):
     total_loss = 0.0
     class_correct = [0] * num_classes
     class_total = [0] * num_classes
+    confusion_matrix = [
+        [0 for _ in range(num_classes)]
+        for _ in range(num_classes)
+    ]
 
     with torch.no_grad():
         for xb, yb in dataloader:
@@ -120,8 +124,10 @@ def evaluate_model(model, dataloader, device, num_classes, class_names=None):
 
             for target, prediction in zip(yb, pred):
                 target_idx = int(target.item())
+                prediction_idx = int(prediction.item())
                 class_total[target_idx] += 1
-                class_correct[target_idx] += int(prediction.item() == target_idx)
+                class_correct[target_idx] += int(prediction_idx == target_idx)
+                confusion_matrix[target_idx][prediction_idx] += 1
 
     per_class_accuracy = {}
     class_names = class_names or [str(index) for index in range(num_classes)]
@@ -136,11 +142,60 @@ def evaluate_model(model, dataloader, device, num_classes, class_names=None):
         if per_class_accuracy else 0.0
     )
 
+    per_class_metrics = []
+    for class_idx, class_name in enumerate(class_names):
+        true_positive = confusion_matrix[class_idx][class_idx]
+        false_positive = sum(row[class_idx] for row in confusion_matrix) - true_positive
+        false_negative = sum(confusion_matrix[class_idx]) - true_positive
+        support = class_total[class_idx]
+
+        precision = (
+            true_positive / (true_positive + false_positive)
+            if true_positive + false_positive > 0 else 0.0
+        )
+        recall = (
+            true_positive / (true_positive + false_negative)
+            if true_positive + false_negative > 0 else 0.0
+        )
+        f1_score = (
+            2 * precision * recall / (precision + recall)
+            if precision + recall > 0 else 0.0
+        )
+
+        per_class_metrics.append({
+            "class": class_name,
+            "precision": precision,
+            "recall": recall,
+            "sensitivity": recall,
+            "f1": f1_score,
+            "support": support,
+        })
+
+    macro_precision = (
+        sum(item["precision"] for item in per_class_metrics) / len(per_class_metrics)
+        if per_class_metrics else 0.0
+    )
+    macro_recall = (
+        sum(item["recall"] for item in per_class_metrics) / len(per_class_metrics)
+        if per_class_metrics else 0.0
+    )
+    macro_f1 = (
+        sum(item["f1"] for item in per_class_metrics) / len(per_class_metrics)
+        if per_class_metrics else 0.0
+    )
+
     return {
         "loss": total_loss / len(dataloader) if len(dataloader) > 0 else 0.0,
         "accuracy": correct / total if total > 0 else 0.0,
         "macro_accuracy": macro_accuracy,
+        "macro_precision": macro_precision,
+        "macro_recall": macro_recall,
+        "macro_sensitivity": macro_recall,
+        "macro_f1": macro_f1,
         "per_class_accuracy": per_class_accuracy,
+        "per_class_metrics": per_class_metrics,
+        "confusion_matrix": confusion_matrix,
+        "classification_report": per_class_metrics,
     }
 
 

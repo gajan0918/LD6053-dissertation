@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/services.dart';
+
 class DogSkinDiseasePredictorPage extends StatefulWidget {
   const DogSkinDiseasePredictorPage({super.key});
 
@@ -14,6 +15,10 @@ class DogSkinDiseasePredictorPage extends StatefulWidget {
 
 class _DogSkinDiseasePredictorPageState
     extends State<DogSkinDiseasePredictorPage> {
+  static const String _apiBaseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'http://10.0.2.2:5001',
+  );
 
   File? _selectedImage;
 
@@ -30,6 +35,13 @@ class _DogSkinDiseasePredictorPageState
   String _errorText = "";
 
   final ImagePicker _picker = ImagePicker();
+
+  Uri get _predictUri {
+    final baseUrl = _apiBaseUrl.endsWith('/')
+        ? _apiBaseUrl.substring(0, _apiBaseUrl.length - 1)
+        : _apiBaseUrl;
+    return Uri.parse('$baseUrl/predict');
+  }
 
   // ================= IMAGE PICKER =================
   Future<void> _pickImage(ImageSource source) async {
@@ -51,15 +63,17 @@ class _DogSkinDiseasePredictorPageState
     showModalBottomSheet(
       context: context,
       shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(25))),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
+      ),
       builder: (context) => Padding(
         padding: EdgeInsets.all(20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text("Select Image Source",
-                style: TextStyle(
-                    fontSize: 18, fontWeight: FontWeight.bold)),
+            Text(
+              "Select Image Source",
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
             SizedBox(height: 20),
             ListTile(
               leading: Icon(Icons.camera_alt, color: Colors.blue),
@@ -93,17 +107,20 @@ class _DogSkinDiseasePredictorPageState
     setState(() => _isLoading = true);
 
     try {
-      var uri = Uri.parse('http://192.168.1.196:5001/predict');
+      var uri = _predictUri;
 
       var request = http.MultipartRequest('POST', uri)
-        ..files.add(await http.MultipartFile.fromPath(
-            'image', _selectedImage!.path));
+        ..files.add(
+          await http.MultipartFile.fromPath('image', _selectedImage!.path),
+        );
 
       // Add a longer timeout (60 seconds for OpenAI API)
       var response = await request.send().timeout(
         Duration(seconds: 60),
         onTimeout: () {
-          throw Exception('Request timed out. The server is taking too long to respond.');
+          throw Exception(
+            'Request timed out. The server is taking too long to respond.',
+          );
         },
       );
 
@@ -127,28 +144,37 @@ class _DogSkinDiseasePredictorPageState
 
           _showResultModal();
         }
-      } else if (response.statusCode == 400) {
+      } else if (response.statusCode == 400 || response.statusCode == 422) {
         final data = json.decode(responseData);
-        
+
         if (data['status'] == 'low_confidence') {
-          setState(() => _errorText = "❌ Image too unclear (${data['confidence']}% confidence)\n\n${data['error']}\n\n💡 ${data['suggestion']}");
+          setState(
+            () => _errorText =
+                "❌ Image too unclear (${data['confidence']}% confidence)\n\n${data['error']}\n\n💡 ${data['suggestion']}",
+          );
         } else if (data['status'] == 'invalid_content') {
-          setState(() => _errorText = "❌ Not a dog skin image\n\n${data['error']}\n\n💡 ${data['suggestion']}");
+          setState(
+            () => _errorText =
+                "❌ Not a dog skin image\n\n${data['error']}\n\n💡 ${data['suggestion']}",
+          );
         } else {
-          setState(() => _errorText = data['error'] ?? "Invalid request: ${response.statusCode}");
+          setState(
+            () => _errorText =
+                data['error'] ?? "Invalid request: ${response.statusCode}",
+          );
         }
       } else {
         setState(() => _errorText = "Server error: ${response.statusCode}");
       }
     } catch (e) {
-      print('Error: $e');
+      debugPrint('Prediction request failed: $e');
       setState(() => _errorText = "Connection error: ${e.toString()}");
     }
 
     setState(() => _isLoading = false);
   }
 
-// Helper method to parse fields that could be strings or lists
+  // Helper method to parse fields that could be strings or lists
   List<dynamic> _parseField(dynamic field) {
     if (field == null) return [];
     if (field is String) {
@@ -169,8 +195,7 @@ class _DogSkinDiseasePredictorPageState
         height: MediaQuery.of(context).size.height * 0.92,
         decoration: BoxDecoration(
           color: Colors.grey[50],
-          borderRadius:
-          BorderRadius.vertical(top: Radius.circular(30)),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
         ),
         child: Padding(
           padding: EdgeInsets.all(20),
@@ -178,7 +203,6 @@ class _DogSkinDiseasePredictorPageState
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-
                 Center(
                   child: Container(
                     width: 60,
@@ -195,9 +219,7 @@ class _DogSkinDiseasePredictorPageState
                 Center(
                   child: Text(
                     "AI Dog Health Assistant",
-                    style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold),
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                   ),
                 ),
 
@@ -207,17 +229,17 @@ class _DogSkinDiseasePredictorPageState
                 Text(
                   _predictedDisease,
                   style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.blueAccent),
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.blueAccent,
+                  ),
                 ),
 
                 SizedBox(height: 10),
 
                 // Confidence Badge
                 Container(
-                  padding:
-                  EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   decoration: BoxDecoration(
                     color: Colors.green.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(20),
@@ -225,24 +247,25 @@ class _DogSkinDiseasePredictorPageState
                   child: Text(
                     "Confidence: $_confidence",
                     style: TextStyle(
-                        color: Colors.green[800],
-                        fontWeight: FontWeight.bold),
+                      color: Colors.green[800],
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
 
                 SizedBox(height: 25),
 
-                _buildSection(
-                    Icons.description, "Description", _description),
+                _buildSection(Icons.description, "Description", _description),
+
+                _buildListSection(Icons.healing, "Symptoms", _symptoms),
+
+                _buildListSection(Icons.coronavirus, "Causes", _causes),
 
                 _buildListSection(
-                    Icons.healing, "Symptoms", _symptoms),
-
-                _buildListSection(
-                    Icons.coronavirus, "Causes", _causes),
-
-                _buildListSection(
-                    Icons.medical_services, "Treatment", _treatment),
+                  Icons.medical_services,
+                  "Treatment",
+                  _treatment,
+                ),
 
                 if (_whenToSeeVet.isNotEmpty)
                   Container(
@@ -255,17 +278,17 @@ class _DogSkinDiseasePredictorPageState
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(Icons.warning,
-                            color: Colors.red),
+                        Icon(Icons.warning, color: Colors.red),
                         SizedBox(width: 10),
                         Expanded(
                           child: Text(
                             _whenToSeeVet,
                             style: TextStyle(
-                                color: Colors.red[800],
-                                fontWeight: FontWeight.w500),
+                              color: Colors.red[800],
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
-                        )
+                        ),
                       ],
                     ),
                   ),
@@ -276,14 +299,17 @@ class _DogSkinDiseasePredictorPageState
                   child: ElevatedButton(
                     onPressed: () => Navigator.pop(context),
                     style: ElevatedButton.styleFrom(
-                        padding: EdgeInsets.symmetric(
-                            horizontal: 40, vertical: 14),
-                        shape: RoundedRectangleBorder(
-                            borderRadius:
-                            BorderRadius.circular(25))),
+                      padding: EdgeInsets.symmetric(
+                        horizontal: 40,
+                        vertical: 14,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(25),
+                      ),
+                    ),
                     child: Text("Close"),
                   ),
-                )
+                ),
               ],
             ),
           ),
@@ -302,9 +328,10 @@ class _DogSkinDiseasePredictorPageState
         borderRadius: BorderRadius.circular(18),
         boxShadow: [
           BoxShadow(
-              color: Colors.black12,
-              blurRadius: 10,
-              offset: Offset(0, 4))
+            color: Colors.black12,
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
         ],
       ),
       child: Column(
@@ -314,10 +341,10 @@ class _DogSkinDiseasePredictorPageState
             children: [
               Icon(icon, color: Colors.blueAccent),
               SizedBox(width: 8),
-              Text(title,
-                  style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold)),
+              Text(
+                title,
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
             ],
           ),
           SizedBox(height: 10),
@@ -327,8 +354,7 @@ class _DogSkinDiseasePredictorPageState
     );
   }
 
-  Widget _buildListSection(
-      IconData icon, String title, List<dynamic> items) {
+  Widget _buildListSection(IconData icon, String title, List<dynamic> items) {
     if (items.isEmpty) return SizedBox();
     return Container(
       margin: EdgeInsets.only(bottom: 20),
@@ -338,9 +364,10 @@ class _DogSkinDiseasePredictorPageState
         borderRadius: BorderRadius.circular(18),
         boxShadow: [
           BoxShadow(
-              color: Colors.black12,
-              blurRadius: 10,
-              offset: Offset(0, 4))
+            color: Colors.black12,
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
         ],
       ),
       child: Column(
@@ -350,17 +377,19 @@ class _DogSkinDiseasePredictorPageState
             children: [
               Icon(icon, color: Colors.blueAccent),
               SizedBox(width: 8),
-              Text(title,
-                  style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold)),
+              Text(
+                title,
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
             ],
           ),
           SizedBox(height: 10),
-          ...items.map((e) => Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Text("• $e"),
-          ))
+          ...items.map(
+            (e) => Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Text("• $e"),
+            ),
+          ),
         ],
       ),
     );
@@ -373,8 +402,6 @@ class _DogSkinDiseasePredictorPageState
     return Scaffold(
       backgroundColor: Colors.grey[100],
 
-
-
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 1,
@@ -383,7 +410,6 @@ class _DogSkinDiseasePredictorPageState
         title: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-
             // LEFT - Welcome Text
             Text(
               "Welcome",
@@ -396,10 +422,7 @@ class _DogSkinDiseasePredictorPageState
 
             // RIGHT - Exit Icon
             IconButton(
-              icon: Icon(
-                Icons.exit_to_app,
-                color: Colors.redAccent,
-              ),
+              icon: Icon(Icons.exit_to_app, color: Colors.redAccent),
               onPressed: () {
                 SystemNavigator.pop(); // Proper app exit
               },
@@ -408,22 +431,16 @@ class _DogSkinDiseasePredictorPageState
         ),
       ),
 
-
-
       body: Center(
         child: SingleChildScrollView(
           padding: EdgeInsets.symmetric(horizontal: 24),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-
               // Title
               Text(
                 "AI Dog Health Assistant",
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
               ),
 
               SizedBox(height: 8),
@@ -448,7 +465,11 @@ class _DogSkinDiseasePredictorPageState
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.warning_amber_rounded, color: Colors.orange[700], size: 20),
+                    Icon(
+                      Icons.warning_amber_rounded,
+                      color: Colors.orange[700],
+                      size: 20,
+                    ),
                     SizedBox(width: 10),
                     Expanded(
                       child: Text(
@@ -478,12 +499,11 @@ class _DogSkinDiseasePredictorPageState
                       color: Colors.black12,
                       blurRadius: 20,
                       offset: Offset(0, 8),
-                    )
+                    ),
                   ],
                 ),
                 child: Column(
                   children: [
-
                     // Image Preview Area
                     GestureDetector(
                       onTap: _showImageSourceSelector,
@@ -499,37 +519,37 @@ class _DogSkinDiseasePredictorPageState
                         ),
                         child: _selectedImage != null
                             ? ClipRRect(
-                          borderRadius:
-                          BorderRadius.circular(20),
-                          child: Image.file(
-                            _selectedImage!,
-                            fit: BoxFit.cover,
-                          ),
-                        )
+                                borderRadius: BorderRadius.circular(20),
+                                child: Image.file(
+                                  _selectedImage!,
+                                  fit: BoxFit.cover,
+                                ),
+                              )
                             : Column(
-                          mainAxisAlignment:
-                          MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.cloud_upload_rounded,
-                              size: 60,
-                              color: Colors.blueAccent,
-                            ),
-                            SizedBox(height: 10),
-                            Text(
-                              "No Image Selected",
-                              style: TextStyle(
-                                  fontWeight: FontWeight.w500),
-                            ),
-                            SizedBox(height: 4),
-                            Text(
-                              "Tap to upload or capture",
-                              style: TextStyle(
-                                  fontSize: 13,
-                                  color: Colors.grey),
-                            ),
-                          ],
-                        ),
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.cloud_upload_rounded,
+                                    size: 60,
+                                    color: Colors.blueAccent,
+                                  ),
+                                  SizedBox(height: 10),
+                                  Text(
+                                    "No Image Selected",
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                  SizedBox(height: 4),
+                                  Text(
+                                    "Tap to upload or capture",
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: Colors.grey,
+                                    ),
+                                  ),
+                                ],
+                              ),
                       ),
                     ),
 
@@ -539,16 +559,13 @@ class _DogSkinDiseasePredictorPageState
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(
-                        onPressed: () =>
-                            _pickImage(ImageSource.gallery),
+                        onPressed: () => _pickImage(ImageSource.gallery),
                         icon: Icon(Icons.photo_library),
                         label: Text("Choose from Gallery"),
                         style: ElevatedButton.styleFrom(
-                          padding: EdgeInsets.symmetric(
-                              vertical: 14),
+                          padding: EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(
-                            borderRadius:
-                            BorderRadius.circular(15),
+                            borderRadius: BorderRadius.circular(15),
                           ),
                         ),
                       ),
@@ -560,16 +577,13 @@ class _DogSkinDiseasePredictorPageState
                     SizedBox(
                       width: double.infinity,
                       child: OutlinedButton.icon(
-                        onPressed: () =>
-                            _pickImage(ImageSource.camera),
+                        onPressed: () => _pickImage(ImageSource.camera),
                         icon: Icon(Icons.camera_alt),
                         label: Text("Take a Photo"),
                         style: OutlinedButton.styleFrom(
-                          padding: EdgeInsets.symmetric(
-                              vertical: 14),
+                          padding: EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(
-                            borderRadius:
-                            BorderRadius.circular(15),
+                            borderRadius: BorderRadius.circular(15),
                           ),
                         ),
                       ),
@@ -581,27 +595,22 @@ class _DogSkinDiseasePredictorPageState
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: _isLoading
-                            ? null
-                            : _makePredictionRequest,
+                        onPressed: _isLoading ? null : _makePredictionRequest,
                         style: ElevatedButton.styleFrom(
-                          padding: EdgeInsets.symmetric(
-                              vertical: 16),
+                          padding: EdgeInsets.symmetric(vertical: 16),
                           shape: RoundedRectangleBorder(
-                            borderRadius:
-                            BorderRadius.circular(20),
+                            borderRadius: BorderRadius.circular(20),
                           ),
                         ),
                         child: _isLoading
-                            ? CircularProgressIndicator(
-                            color: Colors.white)
+                            ? CircularProgressIndicator(color: Colors.white)
                             : Text(
-                          "Detect Disease",
-                          style: TextStyle(
-                              fontSize: 16,
-                              fontWeight:
-                              FontWeight.bold),
-                        ),
+                                "Detect Disease",
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                       ),
                     ),
                   ],
@@ -623,7 +632,11 @@ class _DogSkinDiseasePredictorPageState
                       children: [
                         Row(
                           children: [
-                            Icon(Icons.error_outline, color: Colors.red[700], size: 22),
+                            Icon(
+                              Icons.error_outline,
+                              color: Colors.red[700],
+                              size: 22,
+                            ),
                             SizedBox(width: 10),
                             Expanded(
                               child: Text(
@@ -656,6 +669,4 @@ class _DogSkinDiseasePredictorPageState
       ),
     );
   }
-
-
 }
