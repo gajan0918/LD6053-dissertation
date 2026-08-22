@@ -47,7 +47,41 @@ def load_checkpoint_state(model_instance, model_path, device):
     if isinstance(checkpoint, dict) and all(key.startswith("module.") for key in checkpoint):
         checkpoint = {key.removeprefix("module."): value for key, value in checkpoint.items()}
 
+    checkpoint = adapt_checkpoint_output_layer(checkpoint, model_instance)
     model_instance.load_state_dict(checkpoint)
+
+
+def adapt_checkpoint_output_layer(state_dict, model_instance):
+    model_state = model_instance.state_dict()
+    weight_key = "classifier.1.weight"
+    bias_key = "classifier.1.bias"
+
+    if weight_key not in state_dict or bias_key not in state_dict:
+        return state_dict
+
+    checkpoint_weight = state_dict[weight_key]
+    checkpoint_bias = state_dict[bias_key]
+    expected_weight = model_state[weight_key]
+    expected_bias = model_state[bias_key]
+
+    if checkpoint_weight.shape == expected_weight.shape and checkpoint_bias.shape == expected_bias.shape:
+        return state_dict
+
+    has_one_extra_output = (
+        checkpoint_weight.ndim == expected_weight.ndim
+        and checkpoint_bias.ndim == expected_bias.ndim
+        and checkpoint_weight.shape[0] == expected_weight.shape[0] + 1
+        and checkpoint_weight.shape[1:] == expected_weight.shape[1:]
+        and checkpoint_bias.shape[0] == expected_bias.shape[0] + 1
+    )
+    if has_one_extra_output:
+        print("Checkpoint classifier has one extra output; ignoring the final classifier row.")
+        adapted_state = dict(state_dict)
+        adapted_state[weight_key] = checkpoint_weight[: expected_weight.shape[0]]
+        adapted_state[bias_key] = checkpoint_bias[: expected_bias.shape[0]]
+        return adapted_state
+
+    return state_dict
 
 
 def build_loader(dataset_root, split, image_size, batch_size):

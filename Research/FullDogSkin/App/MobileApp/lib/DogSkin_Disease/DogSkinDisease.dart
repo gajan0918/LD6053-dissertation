@@ -192,7 +192,10 @@ class _DogSkinDiseasePredictorPageState
 
     setState(() {
       _isReliableResult = false;
-      _predictedDisease = _problemTitle(status);
+      _predictedDisease = (data['predicted_disease'] ??
+              data['prediction'] ??
+              _problemTitle(status))
+          .toString();
       _confidence =
           _formatPercent(data['confidence'] ?? data['none_confidence']);
       _description = error;
@@ -203,7 +206,14 @@ class _DogSkinDiseasePredictorPageState
       _whenToSeeVet = status == 'invalid_content'
           ? ''
           : 'A veterinarian should check severe, spreading, painful, or persistent skin symptoms.';
-      _topPredictions = _parseTopPredictions(data['top_predictions']);
+      _topPredictions = status == 'invalid_content'
+          ? [
+              {
+                'label': 'None',
+                'confidence': data['confidence'] ?? data['none_confidence'],
+              }
+            ]
+          : _parseTopPredictions(data['top_predictions']);
       _explanationImageBase64 = '';
     });
   }
@@ -213,7 +223,7 @@ class _DogSkinDiseasePredictorPageState
       case 'low_confidence':
         return 'Needs a clearer image';
       case 'invalid_content':
-        return 'Unsupported image';
+        return 'None';
       case 'service_unavailable':
         return 'Prediction service unavailable';
       case 'file_too_large':

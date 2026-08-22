@@ -155,7 +155,7 @@ class _DogSkinDiseasePredictorPageState
         } else if (data['status'] == 'invalid_content') {
           setState(
             () => _errorText =
-                "❌ Not a dog skin image\n\n${data['error']}\n\n💡 ${data['suggestion']}",
+                "❌ Prediction: None\n\n${data['error']}\n\n💡 ${data['suggestion']}",
           );
         } else {
           setState(

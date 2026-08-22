@@ -46,7 +46,7 @@
     },
     {
       "name": "Fungal_infections",
-      "description": "Skin infections caused by fungi, commonly yeast (Malassezia) or dermatophytes.",
+      "description": "Skin infections caused by fungal organisms, including yeast such as Malassezia.",
       "symptoms": [
         "Musty odor from skin",
         "Itching",
@@ -56,14 +56,15 @@
       "causes": [
         "Excess moisture",
         "Weakened immune system",
-        "Underlying allergies"
+        "Underlying allergies",
+        "Skin barrier irritation"
       ],
       "treatment": [
         "Topical antifungal creams or shampoos",
         "Oral antifungal medications",
         "Managing underlying conditions"
       ],
-      "when_to_see_vet": "Vet attention is needed if the dog shows persistent itchiness, odor, or the infection spreads."
+      "when_to_see_vet": "Vet attention is needed if the dog shows persistent itchiness, odor, spreading irritation, or skin that does not improve with basic care."
     },
     {
       "name": "Healthy",
@@ -100,27 +101,6 @@
         "Immunotherapy"
       ],
       "when_to_see_vet": "Vet visit is necessary if itching is severe or stops the dog from resting, eating, or behaving normally."
-    },
-    {
-      "name": "Ringworm",
-      "description": "A contagious fungal infection that affects the skin, hair, and nails of dogs and humans.",
-      "symptoms": [
-        "Circular patches of hair loss",
-        "Red or scaly lesions",
-        "Brittle hair",
-        "Mild itching"
-      ],
-      "causes": [
-        "Dermatophyte fungi (Microsporum, Trichophyton)",
-        "Exposure to infected animals or objects",
-        "Warm, humid environments"
-      ],
-      "treatment": [
-        "Topical antifungal creams",
-        "Oral antifungal tablets",
-        "Environmental disinfection"
-      ],
-      "when_to_see_vet": "See a vet immediately because ringworm is highly contagious to pets and humans."
     }
   ]
 }

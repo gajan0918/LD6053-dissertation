@@ -1,5 +1,6 @@
 import base64
 import io
+import json
 import logging
 import os
 from pathlib import Path
@@ -57,6 +58,7 @@ def get_best_device():
 # CONFIG
 DATASET_DIR = _resolve_path(os.getenv("API_DATASET_DIR", "Dataset/train"))
 MODEL_PATH = _resolve_path(os.getenv("MODEL_PATH", os.getenv("BEST_MODEL_PATH", "best_efficientnet_b0_model.pth")))
+CLASS_NAMES_PATH = _resolve_path(os.getenv("CLASS_NAMES_PATH", "class_names.json"))
 DEVICE = get_best_device()
 IMAGE_SIZE = _get_env_int("IMAGE_SIZE", 224)
 MAX_UPLOAD_MB = _get_env_int("MAX_UPLOAD_MB", 12)
@@ -90,6 +92,15 @@ AUX_NON_DOG_LABELS = {
     "lipstick", "hair slide", "neck brace", "bikini", "maillot",
     "maillot tank suit"
 }
+AUX_STRICT_REJECTION_LABELS = {
+    "wig", "suit", "jersey", "brassiere", "Windsor tie", "lab coat",
+    "academic gown", "trench coat", "sweatshirt", "lipstick", "hair slide",
+    "neck brace", "bikini", "maillot", "maillot tank suit"
+}
+AUX_STRICT_REJECTION_DOG_SCORE_THRESHOLD = _get_env_float(
+    "AUX_STRICT_REJECTION_DOG_SCORE_THRESHOLD",
+    0.1,
+)
 
 Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 
@@ -119,7 +130,30 @@ content_validator_transform = None
 content_validator_categories = None
 
 
-def load_class_names(dataset_path):
+def _validate_class_names(names, source):
+    if not isinstance(names, list) or not names:
+        raise ValueError(f"No class names found in {source}")
+    if not all(isinstance(name, str) and name.strip() for name in names):
+        raise ValueError(f"Class names in {source} must be non-empty strings")
+    return [name.strip() for name in names]
+
+
+def load_class_names_file(class_names_path):
+    with class_names_path.open("r", encoding="utf-8") as file:
+        payload = json.load(file)
+
+    if isinstance(payload, dict):
+        for key in ("class_names", "classes", "labels"):
+            if key in payload:
+                return _validate_class_names(payload[key], class_names_path)
+        labels = payload.get("confusion_matrix", {}).get("labels")
+        if labels is not None:
+            return _validate_class_names(labels, class_names_path)
+
+    return _validate_class_names(payload, class_names_path)
+
+
+def load_dataset_class_names(dataset_path):
     if not dataset_path.exists():
         raise FileNotFoundError(f"Dataset path not found: {dataset_path}")
 
@@ -127,6 +161,24 @@ def load_class_names(dataset_path):
     if not classes:
         raise ValueError(f"No class folders found in dataset path: {dataset_path}")
     return classes
+
+
+def load_class_names(dataset_path):
+    if CLASS_NAMES_PATH.exists():
+        classes = load_class_names_file(CLASS_NAMES_PATH)
+        if dataset_path.exists():
+            dataset_classes = sorted(entry.name for entry in dataset_path.iterdir() if entry.is_dir())
+            if dataset_classes and dataset_classes != classes:
+                LOGGER.warning(
+                    "Using class names from %s because dataset folders do not match the model labels. "
+                    "dataset=%s model=%s",
+                    CLASS_NAMES_PATH,
+                    dataset_classes,
+                    classes,
+                )
+        return classes
+
+    return load_dataset_class_names(dataset_path)
 
 
 def build_model(num_classes):
@@ -147,7 +199,41 @@ def load_checkpoint_state(model_instance, model_path):
     if isinstance(checkpoint, dict) and all(key.startswith("module.") for key in checkpoint):
         checkpoint = {key.removeprefix("module."): value for key, value in checkpoint.items()}
 
+    checkpoint = adapt_checkpoint_output_layer(checkpoint, model_instance)
     model_instance.load_state_dict(checkpoint)
+
+
+def adapt_checkpoint_output_layer(state_dict, model_instance):
+    model_state = model_instance.state_dict()
+    weight_key = "classifier.1.weight"
+    bias_key = "classifier.1.bias"
+
+    if weight_key not in state_dict or bias_key not in state_dict:
+        return state_dict
+
+    checkpoint_weight = state_dict[weight_key]
+    checkpoint_bias = state_dict[bias_key]
+    expected_weight = model_state[weight_key]
+    expected_bias = model_state[bias_key]
+
+    if checkpoint_weight.shape == expected_weight.shape and checkpoint_bias.shape == expected_bias.shape:
+        return state_dict
+
+    has_one_extra_output = (
+        checkpoint_weight.ndim == expected_weight.ndim
+        and checkpoint_bias.ndim == expected_bias.ndim
+        and checkpoint_weight.shape[0] == expected_weight.shape[0] + 1
+        and checkpoint_weight.shape[1:] == expected_weight.shape[1:]
+        and checkpoint_bias.shape[0] == expected_bias.shape[0] + 1
+    )
+    if has_one_extra_output:
+        LOGGER.warning("Checkpoint classifier has one extra output; ignoring the final classifier row.")
+        adapted_state = dict(state_dict)
+        adapted_state[weight_key] = checkpoint_weight[: expected_weight.shape[0]]
+        adapted_state[bias_key] = checkpoint_bias[: expected_bias.shape[0]]
+        return adapted_state
+
+    return state_dict
 
 
 def load_content_validator():
@@ -233,6 +319,7 @@ def health():
         "dataset_loaded": DATASET_DIR.exists(),
         "dataset_path": str(DATASET_DIR),
         "num_classes": len(class_names),
+        "display_classes": get_display_class_names(class_names),
         "device": str(DEVICE),
         "content_validator_loaded": content_validator_model is not None,
         "content_validator_mode": CONTENT_VALIDATOR_MODE,
@@ -264,20 +351,32 @@ def predict():
 
     try:
         img = load_request_image(request.files["image"])
-        pred, conf, probabilities, pred_idx = predict_image(img, model, class_names)
-        top_predictions = get_top_predictions(probabilities, class_names)
+        raw_pred, _raw_conf, probabilities, _raw_pred_idx = predict_image(img, model, class_names)
         none_prob = float(probabilities[none_class_idx].item()) if none_class_idx is not None else 0.0
         none_guard = get_none_guard_result(img)
         if none_guard:
             none_prob = max(none_prob, none_guard["none_prob"])
             if none_guard["is_none"]:
-                pred = NONE_CLASS_NAME
-                conf = none_guard["confidence"]
+                raw_pred = NONE_CLASS_NAME
                 probabilities = none_guard["probabilities"]
-                top_predictions = get_top_predictions(probabilities, class_names)
+        pred, conf, pred_idx = get_display_prediction(probabilities, class_names)
+        top_predictions = get_top_predictions(probabilities, class_names)
         dog_score, aux_label, aux_conf = get_aux_content_signals(img)
 
-        if pred == NONE_CLASS_NAME or none_prob >= NONE_REJECTION_THRESHOLD:
+        if (
+            aux_label in AUX_STRICT_REJECTION_LABELS
+            and dog_score is not None
+            and dog_score < AUX_STRICT_REJECTION_DOG_SCORE_THRESHOLD
+        ):
+            return jsonify(build_invalid_content_response(
+                none_prob,
+                dog_score,
+                aux_label,
+                aux_conf,
+                top_predictions,
+            )), 422
+
+        if raw_pred == NONE_CLASS_NAME or none_prob >= NONE_REJECTION_THRESHOLD:
             if dog_score is not None and dog_score >= AUX_DOG_RESCUE_THRESHOLD:
                 return jsonify(build_uncertain_dog_response(
                     none_prob,
@@ -329,7 +428,7 @@ def predict():
 
         info = get_disease_info(pred, disease_data)
         response = build_success_response(pred, conf, info, top_predictions)
-        explanation = build_explanation_response(img, pred_idx)
+        explanation = build_explanation_response(img, pred_idx, pred)
         if explanation:
             response["explanation"] = explanation
         return jsonify(response)
@@ -406,16 +505,33 @@ def weights_cached(weights):
 
 
 def build_invalid_content_response(none_prob, dog_score, aux_label=None, aux_conf=None, top_predictions=None):
+    none_confidence = get_invalid_content_none_confidence(none_prob, dog_score)
     response = {
         "status": "invalid_content",
+        "prediction": NONE_CLASS_NAME,
+        "predicted_disease": NONE_CLASS_NAME,
+        "confidence": round(none_confidence * 100, 2),
         "error": "Image does not appear to be a supported dog skin photo.",
         "suggestion": "Upload a clear close-up photo of a dog's skin, not a human, another animal, or an unrelated object.",
-        "none_confidence": round(none_prob * 100, 2),
-        "top_predictions": top_predictions or [],
+        "none_confidence": round(none_confidence * 100, 2),
+        "top_predictions": [
+            {
+                "label": NONE_CLASS_NAME,
+                "confidence": round(none_confidence * 100, 2),
+            }
+        ],
     }
+    if top_predictions:
+        response["classifier_top_predictions"] = top_predictions
     add_confidence_metadata(response)
     add_validator_fields(response, dog_score, aux_label, aux_conf)
     return response
+
+
+def get_invalid_content_none_confidence(none_prob, dog_score):
+    if dog_score is None:
+        return none_prob
+    return max(none_prob, 1.0 - dog_score)
 
 
 def build_uncertain_dog_response(none_prob, dog_score, aux_label=None, aux_conf=None, top_predictions=None):
@@ -535,7 +651,7 @@ def predict_with_tta(image_pil, model_instance, labels, tta_mode, temperature):
     return predicted_name, confidence_value, probabilities, predicted_index
 
 
-def build_explanation_response(image_pil, target_index):
+def build_explanation_response(image_pil, target_index, target_label=None):
     if not ENABLE_EXPLAINABILITY:
         return None
 
@@ -543,7 +659,7 @@ def build_explanation_response(image_pil, target_index):
         overlay = build_grad_cam_overlay(image_pil, model, target_index)
         return {
             "type": "grad_cam",
-            "target_class": class_names[target_index],
+            "target_class": target_label or class_names[target_index],
             "image_mime": "image/png",
             "image_base64": encode_png_base64(overlay),
         }
@@ -630,18 +746,71 @@ def encode_png_base64(image_pil):
     return base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
+def get_display_label(label):
+    return label
+
+
+def get_display_class_names(labels):
+    display_labels = []
+    seen = set()
+    for label in labels:
+        display_label = get_display_label(label)
+        key = display_label.lower()
+        if key not in seen:
+            display_labels.append(display_label)
+            seen.add(key)
+    return display_labels
+
+
+def build_display_distribution(probabilities, labels):
+    merged = {}
+    order = []
+    for index, label in enumerate(labels):
+        display_label = get_display_label(label)
+        key = display_label.lower()
+        probability = float(probabilities[index].item())
+        if key not in merged:
+            merged[key] = {
+                "label": display_label,
+                "probability": 0.0,
+                "raw_index": index,
+                "raw_probability": -1.0,
+            }
+            order.append(key)
+
+        merged[key]["probability"] += probability
+        if probability > merged[key]["raw_probability"]:
+            merged[key]["raw_probability"] = probability
+            merged[key]["raw_index"] = index
+
+    return [merged[key] for key in order]
+
+
+def get_display_prediction(probabilities, labels):
+    distribution = build_display_distribution(probabilities, labels)
+    if not distribution:
+        raise ValueError("No prediction classes are available.")
+
+    best = max(distribution, key=lambda item: item["probability"])
+    return best["label"], best["probability"], best["raw_index"]
+
+
 def get_top_predictions(probabilities, labels, limit=3):
-    limit = min(limit, len(labels))
+    distribution = sorted(
+        build_display_distribution(probabilities, labels),
+        key=lambda item: item["probability"],
+        reverse=True,
+    )
+    limit = min(limit, len(distribution))
     if limit <= 0:
         return []
 
-    top_probs, top_indices = torch.topk(probabilities, k=limit)
     return [
         {
-            "label": labels[int(index.item())],
-            "confidence": round(float(prob.item()) * 100, 2),
+            "label": item["label"],
+            "confidence": round(item["probability"] * 100, 2),
         }
-        for prob, index in zip(top_probs, top_indices)
+        for item in distribution[:limit]
     ]
 
 
