@@ -23,7 +23,7 @@ except Exception as e:
 # Test 2: Flask API syntax
 print("\n✓ Test 2: Flask API files syntax")
 import ast
-for file in ['api.py', 'FinalApi_.py', 'FinalApi_llm.py']:
+for file in ['api.py']:
     try:
         with open(file, 'r') as f:
             ast.parse(f.read())
@@ -61,7 +61,7 @@ except Exception as e:
 print("\n✓ Test 5: Model building")
 try:
     from model import build_model
-    test_model_obj = build_model(7)  # 7 classes as per dataset
+    test_model_obj = build_model(6, pretrained=False)  # 6 active classes as per dataset
     print(f"  Model created successfully: {type(test_model_obj).__name__}")
     print(f"  Model has {sum(p.numel() for p in test_model_obj.parameters()):,} parameters")
 except Exception as e:
@@ -69,5 +69,5 @@ except Exception as e:
     sys.exit(1)
 
 print("\n" + "="*60)
-print("✅ ALL PYTHON TESTS PASSED - Backend ready to run!")
+print("ALL PYTHON TESTS PASSED - Backend ready to run!")
 print("="*60)

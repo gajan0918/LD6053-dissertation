@@ -1,16 +1,21 @@
+import base64
 import io
+import json
 import logging
 import os
 from pathlib import Path
 from urllib.parse import urlparse
 
+import numpy as np
 import torch
+import torch.nn.functional as F
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from PIL import Image, UnidentifiedImageError
 from torchvision import models, transforms
 from werkzeug.exceptions import RequestEntityTooLarge
 
+from inference_utils import build_prediction_tensor_batch, normalize_tta_mode
 from loadJson import load_disease_data
 from model import build_model as build_classifier_model
 
@@ -52,7 +57,8 @@ def get_best_device():
 
 # CONFIG
 DATASET_DIR = _resolve_path(os.getenv("API_DATASET_DIR", "Dataset/train"))
-MODEL_PATH = _resolve_path(os.getenv("MODEL_PATH", os.getenv("BEST_MODEL_PATH", "best_global_model.pth")))
+MODEL_PATH = _resolve_path(os.getenv("MODEL_PATH", os.getenv("BEST_MODEL_PATH", "best_efficientnet_b0_model.pth")))
+CLASS_NAMES_PATH = _resolve_path(os.getenv("CLASS_NAMES_PATH", "class_names.json"))
 DEVICE = get_best_device()
 IMAGE_SIZE = _get_env_int("IMAGE_SIZE", 224)
 MAX_UPLOAD_MB = _get_env_int("MAX_UPLOAD_MB", 12)
@@ -60,11 +66,20 @@ MIN_IMAGE_DIMENSION = _get_env_int("MIN_IMAGE_DIMENSION", 64)
 MAX_IMAGE_DIMENSION = _get_env_int("MAX_IMAGE_DIMENSION", 10000)
 MAX_IMAGE_PIXELS = _get_env_int("MAX_IMAGE_PIXELS", 60_000_000)
 LOW_CONFIDENCE_THRESHOLD = _get_env_float("LOW_CONFIDENCE_THRESHOLD", 0.75)
+SOFTMAX_TEMPERATURE = max(_get_env_float("SOFTMAX_TEMPERATURE", 0.772956), 1e-6)
+PREDICTION_TTA_MODE = normalize_tta_mode(os.getenv("PREDICTION_TTA_MODE", "five_crop"))
+ENABLE_NONE_GUARD = _get_env_bool("ENABLE_NONE_GUARD", True)
+NONE_GUARD_TTA_MODE = normalize_tta_mode(os.getenv("NONE_GUARD_TTA_MODE", "none"))
+NONE_GUARD_TEMPERATURE = max(_get_env_float("NONE_GUARD_TEMPERATURE", 0.775777), 1e-6)
 NONE_CLASS_NAME = os.getenv("NONE_CLASS_NAME", "None")
 NONE_REJECTION_THRESHOLD = _get_env_float("NONE_REJECTION_THRESHOLD", 0.5)
+STRICT_INVALID_NONE_THRESHOLD = _get_env_float("STRICT_INVALID_NONE_THRESHOLD", 0.35)
 SECONDARY_REJECTION_THRESHOLD = _get_env_float("SECONDARY_REJECTION_THRESHOLD", 0.2)
 AUX_DOG_RESCUE_THRESHOLD = _get_env_float("AUX_DOG_RESCUE_THRESHOLD", 0.9)
 CONTENT_VALIDATOR_MODE = os.getenv("ENABLE_CONTENT_VALIDATOR", "auto").strip().lower()
+ENABLE_EXPLAINABILITY = _get_env_bool("ENABLE_EXPLAINABILITY", True)
+EXPLANATION_MAX_SIDE = _get_env_int("EXPLANATION_MAX_SIDE", 640)
+EXPLANATION_ALPHA = min(max(_get_env_float("EXPLANATION_ALPHA", 0.45), 0.0), 1.0)
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 DOG_BREED_CLASS_INDICES = list(range(151, 269))
 AUX_NON_DOG_LABELS = {
@@ -77,6 +92,15 @@ AUX_NON_DOG_LABELS = {
     "lipstick", "hair slide", "neck brace", "bikini", "maillot",
     "maillot tank suit"
 }
+AUX_STRICT_REJECTION_LABELS = {
+    "wig", "suit", "jersey", "brassiere", "Windsor tie", "lab coat",
+    "academic gown", "trench coat", "sweatshirt", "lipstick", "hair slide",
+    "neck brace", "bikini", "maillot", "maillot tank suit"
+}
+AUX_STRICT_REJECTION_DOG_SCORE_THRESHOLD = _get_env_float(
+    "AUX_STRICT_REJECTION_DOG_SCORE_THRESHOLD",
+    0.1,
+)
 
 Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 
@@ -106,7 +130,30 @@ content_validator_transform = None
 content_validator_categories = None
 
 
-def load_class_names(dataset_path):
+def _validate_class_names(names, source):
+    if not isinstance(names, list) or not names:
+        raise ValueError(f"No class names found in {source}")
+    if not all(isinstance(name, str) and name.strip() for name in names):
+        raise ValueError(f"Class names in {source} must be non-empty strings")
+    return [name.strip() for name in names]
+
+
+def load_class_names_file(class_names_path):
+    with class_names_path.open("r", encoding="utf-8") as file:
+        payload = json.load(file)
+
+    if isinstance(payload, dict):
+        for key in ("class_names", "classes", "labels"):
+            if key in payload:
+                return _validate_class_names(payload[key], class_names_path)
+        labels = payload.get("confusion_matrix", {}).get("labels")
+        if labels is not None:
+            return _validate_class_names(labels, class_names_path)
+
+    return _validate_class_names(payload, class_names_path)
+
+
+def load_dataset_class_names(dataset_path):
     if not dataset_path.exists():
         raise FileNotFoundError(f"Dataset path not found: {dataset_path}")
 
@@ -114,6 +161,24 @@ def load_class_names(dataset_path):
     if not classes:
         raise ValueError(f"No class folders found in dataset path: {dataset_path}")
     return classes
+
+
+def load_class_names(dataset_path):
+    if CLASS_NAMES_PATH.exists():
+        classes = load_class_names_file(CLASS_NAMES_PATH)
+        if dataset_path.exists():
+            dataset_classes = sorted(entry.name for entry in dataset_path.iterdir() if entry.is_dir())
+            if dataset_classes and dataset_classes != classes:
+                LOGGER.warning(
+                    "Using class names from %s because dataset folders do not match the model labels. "
+                    "dataset=%s model=%s",
+                    CLASS_NAMES_PATH,
+                    dataset_classes,
+                    classes,
+                )
+        return classes
+
+    return load_dataset_class_names(dataset_path)
 
 
 def build_model(num_classes):
@@ -134,7 +199,41 @@ def load_checkpoint_state(model_instance, model_path):
     if isinstance(checkpoint, dict) and all(key.startswith("module.") for key in checkpoint):
         checkpoint = {key.removeprefix("module."): value for key, value in checkpoint.items()}
 
+    checkpoint = adapt_checkpoint_output_layer(checkpoint, model_instance)
     model_instance.load_state_dict(checkpoint)
+
+
+def adapt_checkpoint_output_layer(state_dict, model_instance):
+    model_state = model_instance.state_dict()
+    weight_key = "classifier.1.weight"
+    bias_key = "classifier.1.bias"
+
+    if weight_key not in state_dict or bias_key not in state_dict:
+        return state_dict
+
+    checkpoint_weight = state_dict[weight_key]
+    checkpoint_bias = state_dict[bias_key]
+    expected_weight = model_state[weight_key]
+    expected_bias = model_state[bias_key]
+
+    if checkpoint_weight.shape == expected_weight.shape and checkpoint_bias.shape == expected_bias.shape:
+        return state_dict
+
+    has_one_extra_output = (
+        checkpoint_weight.ndim == expected_weight.ndim
+        and checkpoint_bias.ndim == expected_bias.ndim
+        and checkpoint_weight.shape[0] == expected_weight.shape[0] + 1
+        and checkpoint_weight.shape[1:] == expected_weight.shape[1:]
+        and checkpoint_bias.shape[0] == expected_bias.shape[0] + 1
+    )
+    if has_one_extra_output:
+        LOGGER.warning("Checkpoint classifier has one extra output; ignoring the final classifier row.")
+        adapted_state = dict(state_dict)
+        adapted_state[weight_key] = checkpoint_weight[: expected_weight.shape[0]]
+        adapted_state[bias_key] = checkpoint_bias[: expected_bias.shape[0]]
+        return adapted_state
+
+    return state_dict
 
 
 def load_content_validator():
@@ -143,14 +242,15 @@ def load_content_validator():
         return None, None, None
 
     try:
-        weights = models.MobileNet_V2_Weights.IMAGENET1K_V1
+        # Separate ImageNet model used only to reject obviously unrelated uploads.
+        weights = models.EfficientNet_B0_Weights.IMAGENET1K_V1
         if CONTENT_VALIDATOR_MODE == "auto" and not weights_cached(weights):
             LOGGER.info(
                 "Content validator weights are not cached; set ENABLE_CONTENT_VALIDATOR=1 to download them."
             )
             return None, None, None
 
-        validator_model = models.mobilenet_v2(weights=weights).to(DEVICE)
+        validator_model = models.efficientnet_b0(weights=weights).to(DEVICE)
         validator_model.eval()
         return validator_model, weights.transforms(), weights.meta["categories"]
     except Exception as exc:
@@ -219,9 +319,18 @@ def health():
         "dataset_loaded": DATASET_DIR.exists(),
         "dataset_path": str(DATASET_DIR),
         "num_classes": len(class_names),
+        "display_classes": get_display_class_names(class_names),
         "device": str(DEVICE),
         "content_validator_loaded": content_validator_model is not None,
         "content_validator_mode": CONTENT_VALIDATOR_MODE,
+        "softmax_temperature": SOFTMAX_TEMPERATURE,
+        "confidence_calibrated": SOFTMAX_TEMPERATURE != 1.0,
+        "prediction_tta_mode": PREDICTION_TTA_MODE,
+        "none_guard_enabled": ENABLE_NONE_GUARD,
+        "none_guard_tta_mode": NONE_GUARD_TTA_MODE,
+        "none_guard_temperature": NONE_GUARD_TEMPERATURE,
+        "strict_invalid_none_threshold": STRICT_INVALID_NONE_THRESHOLD,
+        "explainability_enabled": ENABLE_EXPLAINABILITY,
     }
     if startup_error:
         response["startup_error"] = startup_error
@@ -242,12 +351,49 @@ def predict():
 
     try:
         img = load_request_image(request.files["image"])
-        pred, conf, probabilities = predict_image(img, model, class_names)
-        top_predictions = get_top_predictions(probabilities, class_names)
+        raw_pred, _raw_conf, probabilities, _raw_pred_idx = predict_image(img, model, class_names)
         none_prob = float(probabilities[none_class_idx].item()) if none_class_idx is not None else 0.0
+        none_guard = get_none_guard_result(img)
+        if none_guard:
+            none_prob = max(none_prob, none_guard["none_prob"])
+            if none_guard["is_none"]:
+                raw_pred = NONE_CLASS_NAME
+                probabilities = none_guard["probabilities"]
+        pred, conf, pred_idx = get_display_prediction(probabilities, class_names)
+        top_predictions = get_top_predictions(probabilities, class_names)
         dog_score, aux_label, aux_conf = get_aux_content_signals(img)
 
-        if pred == NONE_CLASS_NAME or none_prob >= NONE_REJECTION_THRESHOLD:
+        if (
+            aux_label in AUX_STRICT_REJECTION_LABELS
+            and dog_score is not None
+            and dog_score < AUX_STRICT_REJECTION_DOG_SCORE_THRESHOLD
+        ):
+            return jsonify(build_invalid_content_response(
+                none_prob,
+                dog_score,
+                aux_label,
+                aux_conf,
+                top_predictions,
+            )), 422
+
+        if raw_pred == NONE_CLASS_NAME or none_prob >= NONE_REJECTION_THRESHOLD:
+            if dog_score is not None and dog_score >= AUX_DOG_RESCUE_THRESHOLD:
+                return jsonify(build_uncertain_dog_response(
+                    none_prob,
+                    dog_score,
+                    aux_label,
+                    aux_conf,
+                    top_predictions,
+                )), 422
+            return jsonify(build_invalid_content_response(
+                none_prob,
+                dog_score,
+                aux_label,
+                aux_conf,
+                top_predictions,
+            )), 422
+
+        if none_prob >= STRICT_INVALID_NONE_THRESHOLD:
             if dog_score is not None and dog_score >= AUX_DOG_RESCUE_THRESHOLD:
                 return jsonify(build_uncertain_dog_response(
                     none_prob,
@@ -281,7 +427,11 @@ def predict():
             return jsonify(build_low_confidence_response(pred, conf, top_predictions)), 422
 
         info = get_disease_info(pred, disease_data)
-        return jsonify(build_success_response(pred, conf, info, top_predictions))
+        response = build_success_response(pred, conf, info, top_predictions)
+        explanation = build_explanation_response(img, pred_idx, pred)
+        if explanation:
+            response["explanation"] = explanation
+        return jsonify(response)
 
     except ValueError as exc:
         return jsonify({"status": "bad_request", "error": str(exc)}), 400
@@ -355,15 +505,33 @@ def weights_cached(weights):
 
 
 def build_invalid_content_response(none_prob, dog_score, aux_label=None, aux_conf=None, top_predictions=None):
+    none_confidence = get_invalid_content_none_confidence(none_prob, dog_score)
     response = {
         "status": "invalid_content",
+        "prediction": NONE_CLASS_NAME,
+        "predicted_disease": NONE_CLASS_NAME,
+        "confidence": round(none_confidence * 100, 2),
         "error": "Image does not appear to be a supported dog skin photo.",
         "suggestion": "Upload a clear close-up photo of a dog's skin, not a human, another animal, or an unrelated object.",
-        "none_confidence": round(none_prob * 100, 2),
-        "top_predictions": top_predictions or [],
+        "none_confidence": round(none_confidence * 100, 2),
+        "top_predictions": [
+            {
+                "label": NONE_CLASS_NAME,
+                "confidence": round(none_confidence * 100, 2),
+            }
+        ],
     }
+    if top_predictions:
+        response["classifier_top_predictions"] = top_predictions
+    add_confidence_metadata(response)
     add_validator_fields(response, dog_score, aux_label, aux_conf)
     return response
+
+
+def get_invalid_content_none_confidence(none_prob, dog_score):
+    if dog_score is None:
+        return none_prob
+    return max(none_prob, 1.0 - dog_score)
 
 
 def build_uncertain_dog_response(none_prob, dog_score, aux_label=None, aux_conf=None, top_predictions=None):
@@ -374,12 +542,13 @@ def build_uncertain_dog_response(none_prob, dog_score, aux_label=None, aux_conf=
         "none_confidence": round(none_prob * 100, 2),
         "top_predictions": top_predictions or [],
     }
+    add_confidence_metadata(response)
     add_validator_fields(response, dog_score, aux_label, aux_conf)
     return response
 
 
 def build_low_confidence_response(prediction, confidence, top_predictions):
-    return {
+    response = {
         "status": "low_confidence",
         "error": "Prediction confidence is too low to show a reliable result.",
         "suggestion": "Use a sharper, closer, well-lit image of the affected skin area.",
@@ -389,6 +558,8 @@ def build_low_confidence_response(prediction, confidence, top_predictions):
         "required_confidence": round(LOW_CONFIDENCE_THRESHOLD * 100, 2),
         "top_predictions": top_predictions,
     }
+    add_confidence_metadata(response)
+    return response
 
 
 def add_validator_fields(response, dog_score, aux_label, aux_conf):
@@ -398,6 +569,18 @@ def add_validator_fields(response, dog_score, aux_label, aux_conf):
         response["validator_label"] = aux_label
     if aux_conf is not None:
         response["validator_confidence"] = round(aux_conf * 100, 2)
+
+
+def add_confidence_metadata(response):
+    response["confidence_method"] = "softmax"
+    response["softmax_temperature"] = round(SOFTMAX_TEMPERATURE, 6)
+    response["confidence_calibrated"] = SOFTMAX_TEMPERATURE != 1.0
+    response["prediction_tta_mode"] = PREDICTION_TTA_MODE
+    response["none_guard_enabled"] = ENABLE_NONE_GUARD
+    if ENABLE_NONE_GUARD:
+        response["none_guard_tta_mode"] = NONE_GUARD_TTA_MODE
+        response["none_guard_temperature"] = round(NONE_GUARD_TEMPERATURE, 6)
+        response["strict_invalid_none_threshold"] = round(STRICT_INVALID_NONE_THRESHOLD, 6)
 
 
 def build_success_response(prediction, confidence, info, top_predictions):
@@ -413,36 +596,221 @@ def build_success_response(prediction, confidence, info, top_predictions):
         "when_to_see_vet": info.get("when_to_see_vet", "") if info else "",
         "top_predictions": top_predictions,
     }
+    add_confidence_metadata(response)
     return response
 
 
 def predict_image(image_pil, model_instance, labels):
-    tensor = transform(image_pil).unsqueeze(0).to(DEVICE)
+    return predict_with_tta(
+        image_pil,
+        model_instance,
+        labels,
+        PREDICTION_TTA_MODE,
+        SOFTMAX_TEMPERATURE,
+    )
+
+
+def get_none_guard_result(image_pil):
+    if not ENABLE_NONE_GUARD or none_class_idx is None:
+        return None
+
+    pred, conf, probabilities, _pred_idx = predict_with_tta(
+        image_pil,
+        model,
+        class_names,
+        NONE_GUARD_TTA_MODE,
+        NONE_GUARD_TEMPERATURE,
+    )
+    none_prob = float(probabilities[none_class_idx].item())
+    return {
+        "is_none": pred == NONE_CLASS_NAME or none_prob >= NONE_REJECTION_THRESHOLD,
+        "prediction": pred,
+        "confidence": conf,
+        "none_prob": none_prob,
+        "probabilities": probabilities,
+    }
+
+
+def predict_with_tta(image_pil, model_instance, labels, tta_mode, temperature):
+    tensor_batch = build_prediction_tensor_batch(
+        image_pil,
+        IMAGE_SIZE,
+        tta_mode,
+    ).to(DEVICE)
 
     model_instance.eval()
     with torch.no_grad():
-        output = model_instance(tensor)
-        probs = torch.softmax(output, dim=1)
+        output = model_instance(tensor_batch).mean(dim=0, keepdim=True)
+        probs = torch.softmax(output / temperature, dim=1)
         conf, pred_class = probs.max(1)
 
-    predicted_name = labels[pred_class.item()]
+    predicted_index = int(pred_class.item())
+    predicted_name = labels[predicted_index]
     confidence_value = float(conf.item())
     probabilities = probs[0].detach().cpu()
-    return predicted_name, confidence_value, probabilities
+    return predicted_name, confidence_value, probabilities, predicted_index
+
+
+def build_explanation_response(image_pil, target_index, target_label=None):
+    if not ENABLE_EXPLAINABILITY:
+        return None
+
+    try:
+        overlay = build_grad_cam_overlay(image_pil, model, target_index)
+        return {
+            "type": "grad_cam",
+            "target_class": target_label or class_names[target_index],
+            "image_mime": "image/png",
+            "image_base64": encode_png_base64(overlay),
+        }
+    except Exception as exc:
+        LOGGER.warning("Grad-CAM explanation unavailable: %s", exc)
+        return None
+
+
+def build_grad_cam_overlay(image_pil, model_instance, target_index):
+    target_layer = get_grad_cam_target_layer(model_instance)
+    activations = {}
+    gradients = {}
+
+    def forward_hook(_module, _inputs, output):
+        activations["value"] = output
+
+    def backward_hook(_module, _grad_input, grad_output):
+        gradients["value"] = grad_output[0]
+
+    forward_handle = target_layer.register_forward_hook(forward_hook)
+    backward_handle = target_layer.register_full_backward_hook(backward_hook)
+
+    try:
+        tensor = transform(image_pil).unsqueeze(0).to(DEVICE)
+        tensor.requires_grad_(True)
+        model_instance.zero_grad(set_to_none=True)
+
+        with torch.enable_grad():
+            output = model_instance(tensor)
+            score = output[0, target_index]
+            score.backward()
+
+        if "value" not in activations or "value" not in gradients:
+            raise RuntimeError("Unable to capture model activations for explanation.")
+
+        activation = activations["value"].detach()
+        gradient = gradients["value"].detach()
+        weights = gradient.mean(dim=(2, 3), keepdim=True)
+        cam = F.relu((weights * activation).sum(dim=1, keepdim=True))
+        cam = F.interpolate(
+            cam,
+            size=(image_pil.height, image_pil.width),
+            mode="bilinear",
+            align_corners=False,
+        )[0, 0]
+
+        cam = cam - cam.min()
+        max_value = cam.max()
+        if max_value <= 0:
+            raise RuntimeError("Explanation heatmap was empty.")
+        heatmap = (cam / max_value).detach().cpu().numpy()
+        return overlay_heatmap(image_pil, heatmap)
+    finally:
+        forward_handle.remove()
+        backward_handle.remove()
+
+
+def get_grad_cam_target_layer(model_instance):
+    features = getattr(model_instance, "features", None)
+    if features is None or len(features) == 0:
+        raise RuntimeError("Model does not expose EfficientNet feature layers.")
+    return features[-1]
+
+
+def overlay_heatmap(image_pil, heatmap):
+    base = image_pil.convert("RGBA")
+    heatmap = np.clip(heatmap, 0.0, 1.0)
+
+    colored = np.zeros((*heatmap.shape, 4), dtype=np.uint8)
+    colored[..., 0] = 255
+    colored[..., 1] = (heatmap * 180).astype(np.uint8)
+    colored[..., 3] = (heatmap * 255 * EXPLANATION_ALPHA).astype(np.uint8)
+
+    heatmap_image = Image.fromarray(colored, mode="RGBA")
+    return Image.alpha_composite(base, heatmap_image).convert("RGB")
+
+
+def encode_png_base64(image_pil):
+    preview = image_pil.copy()
+    preview.thumbnail((EXPLANATION_MAX_SIDE, EXPLANATION_MAX_SIDE), Image.Resampling.LANCZOS)
+
+    buffer = io.BytesIO()
+    preview.save(buffer, format="PNG")
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+def get_display_label(label):
+    return label
+
+
+def get_display_class_names(labels):
+    display_labels = []
+    seen = set()
+    for label in labels:
+        display_label = get_display_label(label)
+        key = display_label.lower()
+        if key not in seen:
+            display_labels.append(display_label)
+            seen.add(key)
+    return display_labels
+
+
+def build_display_distribution(probabilities, labels):
+    merged = {}
+    order = []
+    for index, label in enumerate(labels):
+        display_label = get_display_label(label)
+        key = display_label.lower()
+        probability = float(probabilities[index].item())
+        if key not in merged:
+            merged[key] = {
+                "label": display_label,
+                "probability": 0.0,
+                "raw_index": index,
+                "raw_probability": -1.0,
+            }
+            order.append(key)
+
+        merged[key]["probability"] += probability
+        if probability > merged[key]["raw_probability"]:
+            merged[key]["raw_probability"] = probability
+            merged[key]["raw_index"] = index
+
+    return [merged[key] for key in order]
+
+
+def get_display_prediction(probabilities, labels):
+    distribution = build_display_distribution(probabilities, labels)
+    if not distribution:
+        raise ValueError("No prediction classes are available.")
+
+    best = max(distribution, key=lambda item: item["probability"])
+    return best["label"], best["probability"], best["raw_index"]
 
 
 def get_top_predictions(probabilities, labels, limit=3):
-    limit = min(limit, len(labels))
+    distribution = sorted(
+        build_display_distribution(probabilities, labels),
+        key=lambda item: item["probability"],
+        reverse=True,
+    )
+    limit = min(limit, len(distribution))
     if limit <= 0:
         return []
 
-    top_probs, top_indices = torch.topk(probabilities, k=limit)
     return [
         {
-            "label": labels[int(index.item())],
-            "confidence": round(float(prob.item()) * 100, 2),
+            "label": item["label"],
+            "confidence": round(item["probability"] * 100, 2),
         }
-        for prob, index in zip(top_probs, top_indices)
+        for item in distribution[:limit]
     ]
 
 

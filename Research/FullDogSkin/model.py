@@ -3,8 +3,8 @@ from torchvision import models
 
 
 def build_model(num_classes, pretrained=True, fine_tune_blocks=6):
-    weights = models.MobileNet_V2_Weights.IMAGENET1K_V1 if pretrained else None
-    model = models.mobilenet_v2(weights=weights)
+    weights = models.EfficientNet_B0_Weights.IMAGENET1K_V1 if pretrained else None
+    model = models.efficientnet_b0(weights=weights)
 
     for param in model.features.parameters():
         param.requires_grad = False
@@ -16,5 +16,3 @@ def build_model(num_classes, pretrained=True, fine_tune_blocks=6):
 
     model.classifier[1] = nn.Linear(model.classifier[1].in_features, num_classes)
     return model
-
-    

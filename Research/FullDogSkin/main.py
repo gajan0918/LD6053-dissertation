@@ -30,7 +30,10 @@ def log_metrics(label, metrics):
     print(
         f"{label} loss={metrics['loss']:.4f} "
         f"acc={metrics['accuracy']*100:.2f}% "
-        f"macro_acc={metrics['macro_accuracy']*100:.2f}%"
+        f"macro_acc={metrics['macro_accuracy']*100:.2f}% "
+        f"precision={metrics['macro_precision']*100:.2f}% "
+        f"recall/sensitivity={metrics['macro_recall']*100:.2f}% "
+        f"f1={metrics['macro_f1']*100:.2f}%"
     )
     worst_classes = sorted(
         metrics["per_class_accuracy"].items(),
@@ -44,6 +47,99 @@ def log_metrics(label, metrics):
         print(f"Worst class accuracy: {summary}")
 
 
+def print_classification_report(label, metrics, class_names):
+    print("\n" + "=" * 80)
+    print(f"{label.upper()} CLASSIFICATION METRICS")
+    print("=" * 80)
+    print(f"Accuracy             : {metrics['accuracy'] * 100:.2f}%")
+    print(f"Macro Precision      : {metrics['macro_precision'] * 100:.2f}%")
+    print(f"Macro Recall         : {metrics['macro_recall'] * 100:.2f}%")
+    print(f"Macro Sensitivity    : {metrics['macro_sensitivity'] * 100:.2f}%")
+    print(f"Macro F1 Score       : {metrics['macro_f1'] * 100:.2f}%")
+
+    print("\nClassification Report:")
+    print(
+        f"{'Class':25}"
+        f"{'Precision':>12}"
+        f"{'Recall':>12}"
+        f"{'Sensitivity':>14}"
+        f"{'F1 Score':>12}"
+        f"{'Support':>10}"
+    )
+    print("-" * 85)
+    for item in metrics["classification_report"]:
+        print(
+            f"{item['class'][:25]:25}"
+            f"{item['precision']:>12.4f}"
+            f"{item['recall']:>12.4f}"
+            f"{item['sensitivity']:>14.4f}"
+            f"{item['f1']:>12.4f}"
+            f"{item['support']:>10}"
+        )
+
+    print("\nConfusion Matrix:")
+    print("Rows = Actual Class, Columns = Predicted Class")
+    print("\nClass Index:")
+    for index, class_name in enumerate(class_names):
+        print(f"{index}: {class_name}")
+
+    header = "Actual \\ Pred".ljust(18)
+    for index in range(len(class_names)):
+        header += f"{index:>6}"
+    print("\n" + header)
+    print("-" * len(header))
+
+    for index, row in enumerate(metrics["confusion_matrix"]):
+        row_text = f"{index} {class_names[index][:14]}".ljust(18)
+        for value in row:
+            row_text += f"{value:>6}"
+        print(row_text)
+    print("=" * 80)
+
+
+def load_checkpoint_state(model, model_path):
+    checkpoint = torch.load(model_path, map_location=DEVICE)
+    if isinstance(checkpoint, dict) and "state_dict" in checkpoint:
+        checkpoint = checkpoint["state_dict"]
+    if isinstance(checkpoint, dict) and all(key.startswith("module.") for key in checkpoint):
+        checkpoint = {key.removeprefix("module."): value for key, value in checkpoint.items()}
+    checkpoint = adapt_checkpoint_output_layer(checkpoint, model)
+    model.load_state_dict(checkpoint)
+
+
+def adapt_checkpoint_output_layer(state_dict, model):
+    model_state = model.state_dict()
+    weight_key = "classifier.1.weight"
+    bias_key = "classifier.1.bias"
+
+    if weight_key not in state_dict or bias_key not in state_dict:
+        return state_dict
+
+    checkpoint_weight = state_dict[weight_key]
+    checkpoint_bias = state_dict[bias_key]
+    expected_weight = model_state[weight_key]
+    expected_bias = model_state[bias_key]
+
+    if checkpoint_weight.shape == expected_weight.shape and checkpoint_bias.shape == expected_bias.shape:
+        return state_dict
+
+    has_one_extra_output = (
+        checkpoint_weight.ndim == expected_weight.ndim
+        and checkpoint_bias.ndim == expected_bias.ndim
+        and checkpoint_weight.shape[0] == expected_weight.shape[0] + 1
+        and checkpoint_weight.shape[1:] == expected_weight.shape[1:]
+        and checkpoint_bias.shape[0] == expected_bias.shape[0] + 1
+    )
+    if has_one_extra_output:
+        print("Checkpoint classifier has one extra output; ignoring the final classifier row.")
+        adapted_state = dict(state_dict)
+        adapted_state[weight_key] = checkpoint_weight[: expected_weight.shape[0]]
+        adapted_state[bias_key] = checkpoint_bias[: expected_bias.shape[0]]
+        return adapted_state
+
+    return state_dict
+
+
 seed_everything(SEED)
 
 train_loader, client_loaders, valid_loader, test_loader, metadata = get_data_loaders(
@@ -55,6 +151,8 @@ train_loader, client_loaders, valid_loader, test_loader, metadata = get_data_loa
     image_size=IMAGE_SIZE,
     class_weight_power=CLASS_WEIGHT_POWER,
     use_weighted_sampler=USE_WEIGHTED_SAMPLER,
+    focus_class_name=FOCUS_CLASS_NAME,
+    focus_class_weight_multiplier=FOCUS_CLASS_WEIGHT_MULTIPLIER,
 )
 
 num_classes = metadata["num_classes"]
@@ -72,14 +170,24 @@ print(f"Central fine-tune epochs: {CENTRAL_FINE_TUNE_EPOCHS}")
 print(f"Head LR: {LR_HEAD}")
 print(f"Backbone LR: {LR_BACKBONE}")
 print(f"Weighted sampler: {USE_WEIGHTED_SAMPLER}")
-print(f"Fine-tuned MobileNet blocks: {FINE_TUNE_BLOCKS}")
+print(f"Pretrained ImageNet initialization: {PRETRAINED}")
+print(f"Fine-tuned EfficientNet-B0 blocks: {FINE_TUNE_BLOCKS}")
+if FOCUS_CLASS_NAME:
+    print(
+        f"Focus class: {FOCUS_CLASS_NAME} "
+        f"(weight multiplier={FOCUS_CLASS_WEIGHT_MULTIPLIER})"
+    )
 print_class_distribution(class_names, class_counts)
 
 global_model = build_model(
     num_classes,
-    pretrained=True,
+    pretrained=PRETRAINED,
     fine_tune_blocks=FINE_TUNE_BLOCKS,
 ).to(DEVICE)
+
+if RESUME_MODEL_PATH:
+    print(f"Loading checkpoint for resume/fine-tuning: {RESUME_MODEL_PATH}")
+    load_checkpoint_state(global_model, RESUME_MODEL_PATH)
 
 best_score = float("-inf")
 best_model_path = BEST_MODEL_PATH
@@ -159,7 +267,7 @@ for round_idx in range(1, ROUNDS + 1):
             break
 
 if os.path.exists(best_model_path):
-    global_model.load_state_dict(torch.load(best_model_path, map_location=DEVICE))
+    load_checkpoint_state(global_model, best_model_path)
 
 if CENTRAL_FINE_TUNE_EPOCHS > 0:
     print("\nStarting centralized fine-tuning on the full training set...\n")
@@ -188,9 +296,10 @@ if CENTRAL_FINE_TUNE_EPOCHS > 0:
         )
 
 if os.path.exists(best_model_path):
-    global_model.load_state_dict(torch.load(best_model_path, map_location=DEVICE))
+    load_checkpoint_state(global_model, best_model_path)
 
 test_metrics = evaluate_model(global_model, test_loader, DEVICE, num_classes, class_names)
 print("\nFinal evaluation on the held-out test set:")
 log_metrics("Test", test_metrics)
+print_classification_report("Test", test_metrics, class_names)
 print(f"Best model saved to: {best_model_path}")
